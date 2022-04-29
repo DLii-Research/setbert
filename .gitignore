@@ -1,3 +1,6 @@
+# Data
+datasets
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -116,6 +119,13 @@ venv.bak/
 
 # Rope project settings
 .ropeproject
+
+# W&B
+wandb
+wandb-debug.log
+logs
+summary*
+run*
 
 # mkdocs documentation
 /site
