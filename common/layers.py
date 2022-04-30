@@ -1,34 +1,31 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras as keras
+import settransformer as st
 
-# https://github.com/gugarosa/nalp/blob/master/nalp/models/layers/gumbel_softmax.py
-def gumbel_distribution(input_shape, eps=1e-20):
-    """Samples a tensor from a Gumbel distribution.
-    Args:
-        input_shape (tuple): Shape of tensor to be sampled.
-    Returns:
-        An input_shape tensor sampled from a Gumbel distribution.
-    """
+from . core.custom_objects import CustomObject, register_custom_objects
 
-    # Samples an uniform distribution based on the input shape
-    uniform_dist = tf.random.uniform(input_shape, 0, 1)
+# Register Additional Layers -----------------------------------------------------------------------
 
-    # Samples from the Gumbel distribution
-    gumbel_dist = -1 * tf.math.log(-1 * tf.math.log(uniform_dist + eps) + eps)
+register_custom_objects(st.custom_layers())
 
-    return gumbel_dist
+# Layer Definitions --------------------------------------------------------------------------------
 
-
+@CustomObject
 class GumbelSoftmax(keras.layers.Layer):
-    """A GumbelSoftmax class is the one in charge of a Gumbel-Softmax layer implementation.
+    """
+    Stolen from: https://github.com/gugarosa/nalp/blob/master/nalp/models/layers/gumbel_softmax.py
+    
+    A GumbelSoftmax class is the one in charge of a Gumbel-Softmax layer implementation.
+    
     References:
         E. Jang, S. Gu, B. Poole. Categorical reparameterization with gumbel-softmax.
         Preprint arXiv:1611.01144 (2016).
     """
 
     def __init__(self, axis=-1, **kwargs):
-        """Initialization method.
+        """
+        Initialization method.
         Args:
             axis (int): Axis to perform the softmax operation.
         """
@@ -37,9 +34,27 @@ class GumbelSoftmax(keras.layers.Layer):
 
         # Defining a property for holding the intended axis
         self.axis = axis
+        
+    def gumbel_distribution(self, input_shape, eps=1e-20):
+        """
+        Samples a tensor from a Gumbel distribution.
+        Args:
+            input_shape (tuple): Shape of tensor to be sampled.
+        Returns:
+            An input_shape tensor sampled from a Gumbel distribution.
+        """
+
+        # Samples an uniform distribution based on the input shape
+        uniform_dist = tf.random.uniform(input_shape, 0, 1)
+
+        # Samples from the Gumbel distribution
+        gumbel_dist = -1 * tf.math.log(-1 * tf.math.log(uniform_dist + eps) + eps)
+
+        return gumbel_dist
 
     def call(self, inputs, tau):
-        """Method that holds vital information whenever this class is called.
+        """
+        Method that holds vital information whenever this class is called.
         Args:
             x (tf.tensor): A tensorflow's tensor holding input data.
             tau (float): Gumbel-Softmax temperature parameter.
@@ -48,7 +63,7 @@ class GumbelSoftmax(keras.layers.Layer):
         """
 
         # Adds a sampled Gumbel distribution to the input
-        x = inputs + gumbel_distribution(tf.shape(inputs))
+        x = inputs + self.gumbel_distribution(tf.shape(inputs))
 
         # Applying the softmax over the Gumbel-based input
         x = tf.nn.softmax(x / tau, self.axis)
@@ -59,14 +74,17 @@ class GumbelSoftmax(keras.layers.Layer):
         return x, y
 
     def get_config(self):
-        """Gets the configuration of the layer for further serialization.
+        """
+        Gets the configuration of the layer for further serialization.
         """
 
         config = {'axis': self.axis}
         base_config = super(GumbelSoftmax, self).get_config()
 
         return dict(list(base_config.items()) + list(config.items()))
+
     
+@CustomObject
 class VaswaniMultiHeadAttention(keras.layers.Layer):
     def __init__(self, embed_dim, num_heads):
         super(VaswaniMultiHeadAttention, self).__init__()
@@ -104,7 +122,8 @@ class VaswaniMultiHeadAttention(keras.layers.Layer):
             k = v
         return self.compute_multihead_attention(q, v, k)
     
-    
+
+@CustomObject
 class RelativeMultiHeadAttention(keras.layers.MultiHeadAttention):
     def __init__(self, max_seq_len=None, **kwargs):
         super(RelativeMultiHeadAttention, self).__init__(**kwargs)
@@ -222,8 +241,9 @@ class BaseTransformerBlock(keras.layers.Layer):
             "prenorm": self.prenorm
         })
         return config
-    
 
+
+@CustomObject
 class TransformerBlock(BaseTransformerBlock):
     def __init__(self, *args, use_vaswani_mha=False, **kwargs):
         self.use_vaswani_mha = use_vaswani_mha
@@ -241,12 +261,14 @@ class TransformerBlock(BaseTransformerBlock):
         })
         return config
     
-    
+
+@CustomObject
 class RelativeTransformerBlock(BaseTransformerBlock):
     def create_attention_layer(self, embed_dim, num_heads):
         return RelativeMultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
     
-    
+
+@CustomObject
 class FixedPositionEmbedding(keras.layers.Layer):
     def __init__(self, length, embed_dim):
         super(FixedPositionEmbedding, self).__init__()
@@ -270,7 +292,8 @@ class FixedPositionEmbedding(keras.layers.Layer):
         })
         return config
     
-    
+
+@CustomObject
 class ConditionedISAB(keras.layers.Layer):
     def __init__(self, embed_dim, dim_cond, num_heads, num_anchors, **kwargs):
         super(ConditionedISAB, self).__init__(**kwargs)
@@ -305,7 +328,8 @@ class ConditionedISAB(keras.layers.Layer):
         })
         return config
     
-    
+
+@CustomObject
 class SampleSet(keras.layers.Layer):
     def __init__(self, max_set_size, embed_dim, **kwargs):
         super(SampleSet, self).__init__(**kwargs)
