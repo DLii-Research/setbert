@@ -54,9 +54,9 @@ def process_sample(inpath, outpath, filename, val_split, test_split, shuffle):
             if start == end:
                 continue
             store = shelve.open(os.path.join(outpath, folder, filename))
-            for i in range(start, end):
+            for key, i in enumerate(range(start, end)):
                 sequence = sequences[indices[i]]
-                store[str(i)] = parse_sequence(sequence)
+                store[str(key)] = parse_sequence(sequence)
             store.close()
             start = end
     
