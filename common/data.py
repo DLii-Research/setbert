@@ -24,7 +24,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         self.seq_len = length - kmer + 1
         self.augment = augment
         self.batch_size = batch_size
-        self.batches_per_epoch = 128
+        self.batches_per_epoch = batches_per_epoch
         self.balance = balance
         self.rng = rng if rng is not None else np.random.default_rng()
         
