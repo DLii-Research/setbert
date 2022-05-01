@@ -4,6 +4,7 @@
     --embed-dim 128 \
     --stack 8 \
     --num-heads 4 \
+    --pre-layernorm true \
     --batches-per-epoch 100 \
     --val-batches-per-epoch 16 \
     --data-augment true \
@@ -12,4 +13,7 @@
     --epochs 500 \
     --batch-size 512 \
     --mask-ratio 0.15 \
+    --optimizer nadam \
+    --lr 4e-4 \
+    --init-lr 0.0 \
     --warmup-steps 10000

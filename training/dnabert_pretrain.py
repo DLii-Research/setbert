@@ -16,6 +16,7 @@ def define_arguments(parser):
     parser.add_argument("--embed-dim", type=int, default=128)
     parser.add_argument("--stack", type=int, default=8)
     parser.add_argument("--num-heads", type=int, default=4)
+    parser.add_argument("--pre-layernorm", type=bool, default=True)
     parser.add_argument("--batches-per-epoch", type=int, default=100)
     parser.add_argument("--val-batches-per-epoch", type=int, default=16)
     parser.add_argument("--data-augment", type=bool, default=True)
@@ -135,8 +136,8 @@ def main(argv):
         train_model=train_model,
         wandb_callback_kwargs=wandb_callback_args,
         wandb_args=dict(
-            group="dnabert:pretrain",
-            name=f"dnabert-{int(datetime.datetime.now().timestamp())}"
+            group="dnabert/pretrain",
+            name=f"dnabert-pretrain-{int(datetime.datetime.now().timestamp())}"
         ))
     return 0
         
