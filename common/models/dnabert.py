@@ -19,13 +19,14 @@ class DnaBertBase(keras.layers.Layer):
     """
     The base DNABERT model
     """
-    def __init__(self, length, kmer, embed_dim, stack, num_heads, **kwargs):
+    def __init__(self, length, kmer, embed_dim, stack, num_heads, pre_layernorm=False, **kwargs):
         super().__init__(**kwargs)
         self.length = length
         self.kmer = kmer
         self.embed_dim = embed_dim
         self.stack = stack
         self.num_heads = num_heads
+        self.pre_layernorm = pre_layernorm
         self.model = self.build_model()
     
     def build_model(self):
@@ -37,7 +38,8 @@ class DnaBertBase(keras.layers.Layer):
         for _ in range(self.stack):
             y = RelativeTransformerBlock(embed_dim=self.embed_dim,
                                          num_heads=self.num_heads,
-                                         ff_dim=self.embed_dim)(y)
+                                         ff_dim=self.embed_dim,
+                                         prenorm=self.pre_layernorm)(y)
         return keras.Model(x, y)
     
     def call(self, x):
@@ -50,7 +52,8 @@ class DnaBertBase(keras.layers.Layer):
             "kmer": self.kmer,
             "embed_dim": self.embed_dim,
             "stack": self.stack,
-            "num_heads": self.num_heads
+            "num_heads": self.num_heads,
+            "pre_layernorm": self.pre_layernorm
         })
         return config
 
@@ -64,9 +67,7 @@ class DnaBertPretrainModel(CustomModel):
         # If the given model is the base DNABERT layer, create the pretrain model
         self.dnabert = dnabert
         if isinstance(dnabert, DnaBertBase):
-            print("Creating pretrain model")
             self.dnabert = create_dnabert_pretrain_model(dnabert)
-        print("ready")
         self.length = length
         self.kmer = kmer
         self.seq_len = length - kmer + 1

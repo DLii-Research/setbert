@@ -173,7 +173,7 @@ class RelativeMultiHeadAttention(keras.layers.MultiHeadAttention):
         # `context_layer` = [B, T, N, H]
         attention_output = tf.einsum(self._combine_equation, attention_scores_dropout, value)
         return attention_output, attention_scores
-        
+    
         
 class BaseTransformerBlock(keras.layers.Layer):
     def __init__(self, embed_dim, num_heads, ff_dim, ff_activation="gelu", gating=None, dropout_rate=0.1, prenorm=False, **kwargs):

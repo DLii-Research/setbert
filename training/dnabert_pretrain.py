@@ -11,6 +11,7 @@ from common.data import find_shelves, DnaSequenceGenerator
 from common.models.dnabert import DnaBertBase, DnaBertPretrainModel
 
 def define_arguments(parser):
+    bool_str = lambda x: x.lower() in {'true', 'yes', 'y', '1'}
     parser.add_argument("--length", type=int, default=150)
     parser.add_argument("--kmer", type=int, default=3)
     parser.add_argument("--embed-dim", type=int, default=128)
@@ -52,12 +53,14 @@ def load_datasets(config, datadir):
 
     
 def create_model(config, datasets):
+    print("\n\n\nCausal:", config.causal, "\n\n\n")
     dnabert = DnaBertBase(
         length=config.length,
         kmer=config.kmer,
         embed_dim=config.embed_dim,
         stack=config.stack,
-        num_heads=config.num_heads)
+        num_heads=config.num_heads,
+        pre_layernorm=config.pre_layernorm)
     model = DnaBertPretrainModel(
         dnabert=dnabert,
         length=config.length,
