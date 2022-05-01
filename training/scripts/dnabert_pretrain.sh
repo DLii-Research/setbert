@@ -1,0 +1,14 @@
+/usr/bin/env python3 ./training/dnabert_pretrain.py \
+    --length 150 \
+    --kmer 3 \
+    --embed-dim 128 \
+    --stack 8 \
+    --num-heads 4 \
+    --batches-per-epoch 32 \
+    --val-batches-per-epoch 32 \
+    --data-augment true \
+    --data-balance false \
+    --data-artifact 'deep-learning-dna/dnasamples:latest' \
+    --epochs 5 \
+    --batch-size 512 \
+    --mask-ratio 0.15

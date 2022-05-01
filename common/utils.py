@@ -8,7 +8,7 @@ def static_vars(**kwargs):
         return func
     return decorate
 
-def load_model(path, custom_objs):
+def load_model(path, custom_objs={}):
     objs = custom_objects()
     objs.update(custom_objs)
     return keras.models.load_model(path, objs)
