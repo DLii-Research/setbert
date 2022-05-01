@@ -121,6 +121,7 @@ venv.bak/
 .ropeproject
 
 # W&B
+artifacts
 wandb
 wandb-debug.log
 logs
