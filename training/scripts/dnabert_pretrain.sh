@@ -4,11 +4,12 @@
     --embed-dim 128 \
     --stack 8 \
     --num-heads 4 \
-    --batches-per-epoch 32 \
-    --val-batches-per-epoch 32 \
+    --batches-per-epoch 100 \
+    --val-batches-per-epoch 16 \
     --data-augment true \
     --data-balance false \
     --data-artifact 'deep-learning-dna/dnasamples:latest' \
-    --epochs 5 \
+    --epochs 500 \
     --batch-size 512 \
-    --mask-ratio 0.15
+    --mask-ratio 0.15 \
+    --warmup-steps 10000
