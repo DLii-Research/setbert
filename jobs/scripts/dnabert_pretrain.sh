@@ -1,4 +1,4 @@
-/usr/bin/env python3 ./training/dnabert_pretrain.py \
+/usr/bin/env python3 ./jobs/dnabert_pretrain.py \
     --length 150 \
     --kmer 3 \
     --embed-dim 128 \

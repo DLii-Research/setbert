@@ -12,3 +12,6 @@ def load_model(path, custom_objs={}):
     objs = custom_objects()
     objs.update(custom_objs)
     return keras.models.load_model(path, objs)
+
+def str_to_bool(s):
+    return s.strip().lower() in {'1', 'true', 'y', 'yes'}

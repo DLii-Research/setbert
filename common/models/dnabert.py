@@ -4,7 +4,18 @@ from . import CustomModel
 from .. core.custom_objects import CustomObject
 from .. layers import RelativeTransformerBlock
 
-def create_dnabert_pretrain_model(dnabert):
+# Functional Model Utilities -----------------------------------------------------------------------
+
+def base_from_model(dnabert):
+    """
+    Extract the DNABERT base model from a pretraining/finetuned model
+    """
+    for layer in dnabert.layers:
+        if isinstance(layer, DnaBertBase):
+            return layer
+    raise Exception("Unable to find DNABERT base model.")
+
+def create_pretrain_model(dnabert):
     """
     Create the pretraining model for DNABERT by attaching a dense layer.
     """
@@ -14,6 +25,38 @@ def create_dnabert_pretrain_model(dnabert):
     y = keras.layers.Dense(5**dnabert.kmer, activation="softmax")(y)
     return keras.Model(x, y, name="DNABERT_pretrain")
 
+def create_embedding_model(dnabert):
+    """
+    Create a sequence-level embedding model from a pretrained DNABERT model
+    """
+    if not isinstance(dnabert, DnaBertBase):
+        dnabert = base_from_model(dnabert)
+    y = x = keras.layers.Input(dnabert.input_shape[1:])
+    y = dnabert(y)
+    y = keras.layers.Lambda(lambda x: x[:,0,:])(y)
+    return keras.Model(x, y)
+
+def create_autoencoder_model(dnabert, stack, num_heads, embed_dim=None, pre_layernorm=True):
+    """
+    Create an autoencoder model from a pretrained DNABERT model
+    """
+    if not isinstance(dnabert, DnaBertBase):
+        dnabert = dnabert_from_model(dnabert)
+    if embed_dim is None:
+        embed_dim = dnabert.embed_dim
+    y = x = keras.layers.Input(dnabert.input_shape[1:])
+    y = dnabert(y)
+    y = keras.layers.Lambda(lambda x: x[:,0,:])(y)
+    y = DnaBertDecoder(
+        length=dnabert.length,
+        stack=stack,
+        num_heads=num_heads,
+        embed_dim=embed_dim,
+        pre_layernorm=pre_layernorm)(y)
+    autoencoder = keras.Model(x, y)
+
+# Layer Definitions --------------------------------------------------------------------------------
+    
 @CustomObject
 class DnaBertBase(keras.layers.Layer):
     """
@@ -57,6 +100,45 @@ class DnaBertBase(keras.layers.Layer):
         })
         return config
 
+@CustomObject
+class DnaBertDecoder(keras.layers.Layer):
+    def __init__(self, length, stack, num_heads, embed_dim, pre_layernorm=True, **kwargs):
+        super().__init__(**kwargs)
+        self.length = length
+        self.stack = stack
+        self.num_heads = num_heads
+        self.embed_dim = embed_dim
+        self.pre_layernorm = pre_layernorm
+        self.model = None # set in build below
+        
+    def build(self, input_shape):
+        y = x = keras.layers.Input((input_shape[1:]))
+        y = keras.layers.Dense(self.length*self.embed_dim)(y)
+        y = keras.layers.Reshape((self.length, self.embed_dim))(y)
+        for i in range(self.stack):
+            y = RelativeTransformerBlock(embed_dim=self.embed_dim,
+                                         num_heads=self.num_heads,
+                                         ff_dim=self.embed_dim,
+                                         prenorm=self.pre_layernorm)(y)
+        y = keras.layers.Dense(5)(y)
+        self.model = keras.Model(x, y)
+        
+    def call(self, x):
+        return self.model(x)
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "length": self.length,
+            "stack": self.stack,
+            "num_heads": self.num_heads,
+            "embed_dim": self.embed_dim,
+            "pre_layernorm": self.pre_layernorm
+        })
+        return config
+
+# Custom Model Definitions -------------------------------------------------------------------------
+    
 class DnaBertPretrainModel(CustomModel):
     """
     A Keras model wrapper for pretraining a DNABERT model.
@@ -67,7 +149,7 @@ class DnaBertPretrainModel(CustomModel):
         # If the given model is the base DNABERT layer, create the pretrain model
         self.dnabert = dnabert
         if isinstance(dnabert, DnaBertBase):
-            self.dnabert = create_dnabert_pretrain_model(dnabert)
+            self.dnabert = create_pretrain_model(dnabert)
         self.length = length
         self.kmer = kmer
         self.seq_len = length - kmer + 1
