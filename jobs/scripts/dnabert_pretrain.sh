@@ -9,6 +9,7 @@
     --val-batches-per-epoch 16 \
     --data-augment true \
     --data-balance false \
+    --data-workers 1 \
     --data-artifact 'deep-learning-dna/dnasamples:latest' \
     --epochs 500 \
     --batch-size 512 \

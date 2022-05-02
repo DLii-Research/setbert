@@ -26,6 +26,7 @@ def define_arguments(parser):
     parser.add_argument("--val-batches-per-epoch", type=int, default=16)
     parser.add_argument("--data-augment", type=bool, default=True)
     parser.add_argument("--data-balance", type=bool, default=False)
+    parser.add_argument("--data-workers", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--mask-ratio", type=float, default=0.15)
@@ -96,7 +97,9 @@ def train_model(config, train_data, val_data, model, callbacks):
         train_data,
         validation_data=val_data,
         epochs=config.epochs,
-        callbacks=callbacks)
+        callbacks=callbacks,
+        use_multiprocessing=(config.data_workers > 1),
+        workers=config.data_workers)
     
     
 def main(argv):
