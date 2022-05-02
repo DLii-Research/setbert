@@ -15,13 +15,12 @@ class DnaSequenceGenerator(keras.utils.Sequence):
     """
     A DNA sequence generator for Keras models
     """
-    def __init__(self, samples, length, kmer=1, batch_size=32, batches_per_epoch=128, augment=True, balance=False, rng=None):
+    def __init__(self, samples, length, batch_size=32, batches_per_epoch=128, augment=True, balance=False, rng=None):
+        super().__init__()
         self.samples = [shelve.open(s) for s in samples]
         self.sample_lengths = np.array([len(s) for s in self.samples])
         self.num_samples = len(self.samples)
         self.length = length
-        self.kmer = kmer
-        self.seq_len = length - kmer + 1
         self.augment = augment
         self.batch_size = batch_size
         self.batches_per_epoch = batches_per_epoch
@@ -50,13 +49,6 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         idx = self.rng.integers(self.sample_lengths[sample_idx])
         return self.samples[sample_idx][str(idx)]
     
-    def to_kmers(self, batch):
-        shape = np.shape(batch)
-        result = np.zeros((self.batch_size, self.seq_len), dtype=np.int32)
-        for i, j in enumerate(reversed(range(self.kmer))):
-            result += batch[:,j:j + self.seq_len] * 5**i
-        return result
-    
     def __len__(self):
         return self.batches_per_epoch
     
@@ -64,4 +56,28 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         batch = np.empty((self.batch_size, self.length), dtype=np.int32)
         for i in range(self.batch_size):
             batch[i] = np.frombuffer(self.augment_fn(self.random_sequence(self.random_sample())), dtype=np.uint8)
-        return self.to_kmers(batch)
+        return batch
+    
+
+class DnaKmerSequenceGenerator(DnaSequenceGenerator):
+    def __init__(self, *args, kmer=1, include_1mer=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.kmer = kmer
+        self.include_1mer = include_1mer
+        self.seq_len = self.length - self.kmer + 1
+        
+        if self.include_1mer:
+            self.modify = lambda batch: (self.to_kmers(batch), batch)
+        else:
+            self.modify = lambda batch: self.to_kmers(batch)
+        
+    def to_kmers(self, batch):
+        shape = np.shape(batch)
+        result = np.zeros((self.batch_size, self.seq_len), dtype=np.int32)
+        for i, j in enumerate(reversed(range(self.kmer))):
+            result += batch[:,j:j + self.seq_len] * 5**i
+        return result
+    
+    def __getitem__(self, _):
+        batch = super().__getitem__(_)
+        return self.modify(batch)
