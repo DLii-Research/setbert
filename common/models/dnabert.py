@@ -44,16 +44,17 @@ def create_autoencoder_model(dnabert, stack, num_heads, embed_dim=None, pre_laye
         dnabert = dnabert_from_model(dnabert)
     if embed_dim is None:
         embed_dim = dnabert.embed_dim
-    y = x = keras.layers.Input(dnabert.input_shape[1:])
+    y = x = keras.layers.Input((dnabert.length - dnabert.kmer + 1,))
     y = dnabert(y)
     y = keras.layers.Lambda(lambda x: x[:,0,:])(y)
     y = DnaBertDecoder(
+        latent_dim=dnabert.embed_dim,
         length=dnabert.length,
         stack=stack,
         num_heads=num_heads,
         embed_dim=embed_dim,
         pre_layernorm=pre_layernorm)(y)
-    autoencoder = keras.Model(x, y)
+    return keras.Model(x, y)
 
 # Layer Definitions --------------------------------------------------------------------------------
     
@@ -102,17 +103,18 @@ class DnaBertBase(keras.layers.Layer):
 
 @CustomObject
 class DnaBertDecoder(keras.layers.Layer):
-    def __init__(self, length, stack, num_heads, embed_dim, pre_layernorm=True, **kwargs):
+    def __init__(self, latent_dim, length, stack, num_heads, embed_dim, pre_layernorm=True, **kwargs):
         super().__init__(**kwargs)
+        self.latent_dim = latent_dim
         self.length = length
         self.stack = stack
         self.num_heads = num_heads
         self.embed_dim = embed_dim
         self.pre_layernorm = pre_layernorm
-        self.model = None # set in build below
+        self.model = self.build_model()
         
-    def build(self, input_shape):
-        y = x = keras.layers.Input((input_shape[1:]))
+    def build_model(self):
+        y = x = keras.layers.Input((self.latent_dim,))
         y = keras.layers.Dense(self.length*self.embed_dim)(y)
         y = keras.layers.Reshape((self.length, self.embed_dim))(y)
         for i in range(self.stack):
@@ -121,7 +123,7 @@ class DnaBertDecoder(keras.layers.Layer):
                                          ff_dim=self.embed_dim,
                                          prenorm=self.pre_layernorm)(y)
         y = keras.layers.Dense(5)(y)
-        self.model = keras.Model(x, y)
+        return keras.Model(x, y)
         
     def call(self, x):
         return self.model(x)
@@ -129,6 +131,7 @@ class DnaBertDecoder(keras.layers.Layer):
     def get_config(self):
         config = super().get_config()
         config.update({
+            "latent_dim": self.latent_dim,
             "length": self.length,
             "stack": self.stack,
             "num_heads": self.num_heads,

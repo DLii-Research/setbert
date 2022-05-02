@@ -1,8 +1,7 @@
-/usr/bin/env python3 ./jobs/dnabert_pretrain.py \
-    --length 150 \
-    --kmer 3 \
-    --embed-dim 128 \
-    --stack 8 \
+/usr/bin/env python3 ./jobs/finetune_dnabert_autoencoder.py \
+    --pretrained-model-artifact 'deep-learning-dna/dnabert-pretrain:v0' \
+    --embed-dim 64 \
+    --stack 4 \
     --num-heads 4 \
     --pre-layernorm true \
     --batches-per-epoch 100 \
@@ -11,10 +10,7 @@
     --data-balance false \
     --data-workers 1 \
     --data-artifact 'deep-learning-dna/dnasamples:latest' \
-    --epochs 500 \
+    --epochs 100 \
     --batch-size 512 \
-    --mask-ratio 0.15 \
     --optimizer nadam \
-    --lr 4e-4 \
-    --init-lr 0.0 \
-    --warmup-steps 10000
+    --lr 4e-4

@@ -28,6 +28,8 @@ class JobType:
     """
     Standardize job types.
     """
+    UploadArtifact = "upload-artifact"
+    
     Evaluate = "evaluate"
     Finetune = "finetune"
     Pretrain ="pretrain"
@@ -36,7 +38,7 @@ class JobType:
 # Internal Functions -------------------------------------------------------------------------------
 
     
-def __define_arguments(parser):
+def __define_train_eval_arguments(parser):
     """
     Define common arguments for all job types.
     """
@@ -55,9 +57,11 @@ def __create_config(argv, job_type, arg_defs):
     """
     Create the configuration using tf_utils.
     """
-    defs = [__define_arguments]
+    defs = []
     if arg_defs is not None:
         defs.append(arg_defs)
+    if job_type in {JobType.Evaluate, JobType.Finetune, JobType.Pretrain, JobType.Train}:
+        defs.append(__define_train_eval_arguments)
     if job_type in {JobType.Finetune, JobType.Pretrain, JobType.Train}:
         defs.append(__define_training_arguments)
     return tfu.config.create_config(argv[1:], defs)
@@ -84,8 +88,9 @@ def init(argv, job_info, arg_defs=None, **kwargs):
     # Create the configuration
     __config = __create_config(argv, job_info["job_type"], arg_defs)
     
-    # Create the training strategy
-    __strategy = tfu.strategy.gpu(list(map(int, os.environ["GPUS"].split(','))))
+    # Create the training/evaluation strategy
+    if job_info["job_type"] in {JobType.Evaluate, JobType.Finetune, JobType.Pretrain, JobType.Train}:
+        __strategy = tfu.strategy.gpu(list(map(int, os.environ["GPUS"].split(','))))
     
     # initialize W&B if we're using it
     if utils.str_to_bool(os.environ["USE_WANDB"]):
@@ -110,6 +115,7 @@ def save_model(model, path="model.h5"):
     """
     if is_using_wandb():
         path = os.path.join(wandb.run.dir, path)
+    print(f"Saving model to {path}...")
     return model.save(path)
 
     
@@ -149,11 +155,15 @@ def file(file, artifact_name=None, run_path=None, type=None, aliases=None, use_a
     assert not (artifact_name is not None and run_path is not None), "Can't supply both an artifact and run."
     if not is_using_wandb():
         return file
+    
     if artifact_name is not None:
         path = artifact(artifact_name, type, aliases, use_as).download()
     elif run_path is not None:
-        path = run(run_path).file(file).download()
-    return os.path.join(path or "", file)
+        path = "./tmp"
+        run(run_path).file(file).download(path, replace=True)
+    if path is None:
+        return file
+    return os.path.join(path, file)
 
 
 def run(path):
@@ -202,6 +212,9 @@ def wandb_api():
     Fetch the current W&B public API instance.
     """
     global __wandb_api
+    if __wandb_api is None:
+        __wandb_api = wandb.Api()
+    return __wandb_api
 
 
 def wandb_instance():
