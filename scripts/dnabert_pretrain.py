@@ -1,15 +1,11 @@
-import datetime
-import dotenv
 import os
-import tensorflow as tf
 import tensorflow.keras as keras
-import tf_utils as tfu
 import sys
 
 import bootstrap
 from common.callbacks import LearningRateStepScheduler
 from common.data import find_shelves, DnaKmerSequenceGenerator
-from common.models.dnabert import DnaBertBase, DnaBertPretrainModel
+from common.models import dnabert
 
 
 def define_arguments(parser):
@@ -20,7 +16,7 @@ def define_arguments(parser):
     parser.add_argument("--stack", type=int, default=8)
     parser.add_argument("--num-heads", type=int, default=4)
     parser.add_argument("--pre-layernorm", type=bool, default=True)
-    
+
     # Training settings
     parser.add_argument("--batches-per-epoch", type=int, default=100)
     parser.add_argument("--val-batches-per-epoch", type=int, default=16)
@@ -34,8 +30,8 @@ def define_arguments(parser):
     parser.add_argument("--lr", type=float, default=4e-4)
     parser.add_argument("--init-lr", type=float, default=0.0)
     parser.add_argument("--warmup-steps", type=int, default=None)
-    
-    
+
+
 def load_dataset(config, datadir):
     samples = find_shelves(datadir, prepend_path=True)
     dataset = DnaKmerSequenceGenerator(
@@ -47,45 +43,46 @@ def load_dataset(config, datadir):
         augment=config.data_augment,
         balance=config.data_balance)
     return dataset
-    
-        
+
+
 def load_datasets(config):
-    datadir = bootstrap.dataset(config)
-    assert datadir is not None, "No input data supplied."
+    datadir = bootstrap.use_dataset(config)
     datasets = []
     for folder in ("train", "validation"):
         datasets.append(load_dataset(config, os.path.join(datadir, folder)))
     return datasets
 
-    
+
 def create_model(config):
-    dnabert = DnaBertBase(
+    base = dnabert.DnaBertModel(
         length=config.length,
         kmer=config.kmer,
         embed_dim=config.embed_dim,
         stack=config.stack,
         num_heads=config.num_heads,
         pre_layernorm=config.pre_layernorm)
-    model = DnaBertPretrainModel(
-        dnabert=dnabert,
-        length=config.length,
-        kmer=config.kmer,
-        embed_dim=config.embed_dim,
-        stack=config.stack,
-        num_heads=config.num_heads,
+    model = dnabert.DnaBertPretrainModel(
+        base=base,
         mask_ratio=config.mask_ratio)
-    
+
     if config.optimizer == "adam":
         optimizer = keras.optimizers.Adam(config.lr)
     elif config.optimizer == "nadam":
         optimizer = keras.optimizers.Nadam(config.lr)
-    
+
     model.compile(optimizer=optimizer, metrics=[
         keras.metrics.SparseCategoricalAccuracy()
     ])
+
     return model
-    
-def train_model(config, train_data, val_data, model, callbacks):
+
+
+def load_model(path):
+    return dnabert.DnaBertPretrainModel.load(path)
+
+
+def create_callbacks(config):
+    callbacks = bootstrap.callbacks({ "save_model": False })
     if config.warmup_steps is not None:
         callbacks.append(LearningRateStepScheduler(
             init_lr = config.init_lr,
@@ -93,43 +90,68 @@ def train_model(config, train_data, val_data, model, callbacks):
             warmup_steps=config.warmup_steps,
             end_steps=config.batches_per_epoch*config.epochs
         ))
-    model.fit(
-        train_data,
-        validation_data=val_data,
-        epochs=config.epochs,
-        callbacks=callbacks,
-        use_multiprocessing=(config.data_workers > 1),
-        workers=config.data_workers)
-    
-    
+    return callbacks
+
+
+def train(config, model_path=None):
+    with bootstrap.strategy().scope():
+        # Load the dataset
+        train_data, val_data = load_datasets(config)
+
+        # Create the autoencoder model
+        if model_path is not None:
+            model = load_model(model_path)
+        else:
+            model = create_model(config)
+
+        # Create any collbacks we may need
+        callbacks = create_callbacks(config)
+
+        # Train the model with keyboard-interrupt protection
+        bootstrap.run_safely(
+            model.fit,
+            train_data,
+            validation_data=val_data,
+            initial_epoch=bootstrap.initial_epoch(),
+            epochs=config.epochs,
+            callbacks=callbacks,
+            use_multiprocessing=(config.data_workers > 1),
+            workers=config.data_workers)
+
+        # Save the model
+        bootstrap.save_model(model)
+
+    return model
+
+
 def main(argv):
-    
     # Job Information
     job_info = {
-        "name": bootstrap.name_timestamped("dnabert-pretrain"),
+        "name": "dnabert-pretrain",
         "job_type": bootstrap.JobType.Pretrain,
         "group": "dnabert/pretrain"
     }
-    
+
     # Initialize the job and load the config
-    config = bootstrap.init(argv, job_info, define_arguments)
-        
-    # Load the dataset
-    train_data, val_data = load_datasets(config)
-    
-    # Create the autoencoder model
-    model = create_model(config)
-    
-    # Create any collbacks we may need
-    callbacks = bootstrap.callbacks()
-    
-    # Train the model
-    bootstrap.run_safely(train_model, config, train_data, val_data, model, callbacks)
-    
-    # Save the model
-    bootstrap.save_model(model)
-        
-    
+    job_config, config = bootstrap.init(argv, job_info, define_arguments)
+
+    # If this is a resumed run, we need to fetch the latest model run
+    model_path = None
+    if bootstrap.is_resumed():
+        print("Restoring previous model...")
+        model_path = bootstrap.restore_dir(config.save_to)
+
+    # Train the model if necessary
+    if bootstrap.initial_epoch() < config.epochs:
+        train(config, model_path)
+    else:
+        print("Skipping training")
+
+    # Upload an artifact of the model if requested
+    if job_config.log_artifacts:
+        print("Logging artifact...")
+        bootstrap.log_model_artifact(job_info["name"])
+
+
 if __name__ == "__main__":
     sys.exit(main(sys.argv) or 0)
-        
