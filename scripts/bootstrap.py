@@ -37,8 +37,7 @@ class JobType:
     """
     Standardize job types.
     """
-    UploadArtifact = "upload-artifact"
-
+    CreateDataset = "dataset-create"
     Evaluate = "evaluate"
     Finetune = "finetune"
     Pretrain ="pretrain"
@@ -55,9 +54,16 @@ def __define_job_arguments(parser):
     add_job_argument(parser, "--subgroup", type=str, default=None)
 
 
-def __define_train_eval_arguments(parser):
+def __define_dataset_arguments(parser):
     """
-    Define common arguments for all job types.
+    Define common arguments for dataset-related tasks.
+    """
+    parser.add_argument("--data-path", type=str, required=True)
+
+
+def __define_model_arguments(parser):
+    """
+    Define common arguments for model-related tasks.
     """
     parser.add_argument("--data-artifact", type=str, default=None)
 
@@ -90,8 +96,10 @@ def __config_from_cli_args(argv, job_type, arg_defs):
     defs = [__define_job_arguments]
     if arg_defs is not None:
         defs.append(arg_defs)
+    if job_type in {JobType.CreateDataset}:
+        defs.append(__define_dataset_arguments)
     if job_type in {JobType.Evaluate, JobType.Finetune, JobType.Pretrain, JobType.Train}:
-        defs.append(__define_train_eval_arguments)
+        defs.append(__define_model_arguments)
     if job_type in {JobType.Finetune, JobType.Pretrain, JobType.Train}:
         defs.append(__define_training_arguments)
     config = tfu.config.create_config(argv[1:], defs)
@@ -201,9 +209,9 @@ def save_model(model, path=DEFAULT_MODEL_FILE):
     return model.save(path), path
 
 
-def log_model_artifact(name, paths=DEFAULT_MODEL_FILE, type="model", description=None, metadata=None, incremental=None, use_as=None):
+def log_file_artifact(name, paths, type=None, description=None, metadata=None, incremental=None, use_as=None):
     """
-    Log a model artifact to W&B
+    Log an artifact to W&B
     """
     if not is_using_wandb():
         return
@@ -213,10 +221,24 @@ def log_model_artifact(name, paths=DEFAULT_MODEL_FILE, type="model", description
     for path in paths:
         full_path = os.path.join(wandb.run.dir, path)
         if os.path.isdir(full_path):
-           artifact.add_dir(full_path, name=path)
+            artifact.add_dir(full_path)
         else:
-            artifact.add_file(full_path, name=path)
+            artifact.add_file(full_path)
     wandb.run.log_artifact(artifact)
+
+
+def log_dataset_artifact(name, paths, type="dataset", description=None, metadata=None, incremental=None, use_as=None):
+    """
+    A convenience function to log a dataset artifact to W&B
+    """
+    return log_file_artifact(name, paths, type, description, metadata, incremental, use_as)
+
+
+def log_model_artifact(name, paths=DEFAULT_MODEL_FILE, type="model", description=None, metadata=None, incremental=None, use_as=None):
+    """
+    A convenience function to log a model artifact to W&B
+    """
+    return log_file_artifact(name, paths, type, description, metadata, incremental, use_as)
 
 
 def callbacks(wandb_callback_args={}):
@@ -256,7 +278,7 @@ def restore(name, run_path=None, replace=False, root=None):
     """
     Restore the specified file from a previous run
     """
-    return wandb.restore(name, run_path, replace, root).name
+    return wandb.restore(name, run_path, replace, root)
 
 
 def restore_dir(name, run_path=None, replace=False, root=None):
@@ -332,11 +354,11 @@ def is_resumed():
     return wandb.run.resumed
 
 
-def restore(name, run_path=None, replace=False, root=None):
+def data_path(*args):
     """
-    Restore a file from a previous run
+    Prefix the given path with the current run directory
     """
-    return wandb.restore(name, run_path, replace, root)
+    return os.path.join(wandb.run.dir, *args)
 
 
 def run_id():
