@@ -16,12 +16,11 @@ BASE_MAP = {b: i for i, b in enumerate('ACGTN')}
 def define_arguments(parser):
 	parser.add_argument("--val-split", type=float, default=0.1)
 	parser.add_argument("--test-split", type=float, default=0.1)
-	parser.add_argument("--seed", type=int, default=None)
 	parser.add_argument("--shuffle", type=bool, default=True)
 
 
 def encode_base(c):
-    return BASE_MAP[c]
+	return BASE_MAP[c]
 
 
 def parse_sequence(sequence):
