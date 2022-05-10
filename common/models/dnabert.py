@@ -67,12 +67,12 @@ class DnaBertPretrainModel(CustomModel):
         y = x = keras.layers.Input((self.base.length - self.base.kmer + 1,))
         y = self.base(y)
         y = keras.layers.Lambda(lambda x: x[:,1:,:])(y)
-        y = keras.layers.Dense(5**self.base.kmer, activation="softmax")(y)
+        y = keras.layers.Dense(5**self.base.kmer)(y)
         return keras.Model(x, y)
 
     def compile(self, **kwargs):
         if "loss" not in kwargs:
-            kwargs["loss"] = keras.losses.SparseCategoricalCrossentropy(from_logits=False)
+            kwargs["loss"] = keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         super().compile(**kwargs)
 
     def random_mask(self, batch_size):
@@ -197,7 +197,7 @@ class DnaBertDecoderModel(CustomModel):
                                         num_heads=self.num_heads,
                                         ff_dim=self.embed_dim,
                                         prenorm=self.pre_layernorm)(y)
-        y = keras.layers.Dense(5)(y)
+        y = keras.layers.Dense(5, activation="softmax")(y)
         return keras.Model(x, y)
 
     def call(self, inputs, training=None):
