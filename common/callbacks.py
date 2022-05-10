@@ -1,31 +1,28 @@
-import numpy as np
-import tensorflow as tf
 import tensorflow.keras as keras
 import wandb
 
 class LearningRateStepScheduler(keras.callbacks.Callback):
-    def __init__(self, init_lr, max_lr, warmup_steps, end_steps):
-        import wandb
-        super().__init__()
-        self.step = 0
-        self.init_lr = init_lr
-        self.max_lr = max_lr
-        self.warmup_steps = warmup_steps
-        self.end_steps = end_steps
-        self.wandb_run = wandb.run
-    
-    def on_train_batch_begin(self, batch, logs=None):
-        self.step += 1
-        if self.step < self.warmup_steps:
-            lr = self.init_lr + (self.max_lr - self.init_lr)*(self.step/self.warmup_steps)
-        else:
-            lr = self.max_lr - (self.max_lr)*((self.step - self.warmup_steps)/(self.end_steps - self.warmup_steps))
-        self.model.optimizer.learning_rate.assign(lr)
-        
-    def on_epoch_end(self, epoch, logs=None):
-        if self.wandb_run is None:
-            return
-        self.wandb_run.log({
-            "epoch": epoch,
-            "learning_rate": self.model.optimizer.learning_rate.numpy()
-        })
+	def __init__(self, init_lr, max_lr, warmup_steps, end_steps):
+		import wandb
+		super().__init__()
+		self.step = 0
+		self.init_lr = init_lr
+		self.max_lr = max_lr
+		self.warmup_steps = warmup_steps
+		self.end_steps = end_steps
+
+	def on_train_batch_begin(self, batch, logs=None):
+		self.step += 1
+		if self.step < self.warmup_steps:
+			lr = self.init_lr + (self.max_lr - self.init_lr)*(self.step/self.warmup_steps)
+		else:
+			lr = self.max_lr - (self.max_lr)*((self.step - self.warmup_steps)/(self.end_steps - self.warmup_steps))
+		self.model.optimizer.learning_rate.assign(lr)
+
+	def on_epoch_end(self, epoch, logs=None):
+		if wandb.run.disabled:
+			return
+		wandb.run.log({
+			"epoch": epoch,
+			"learning_rate": self.model.optimizer.learning_rate.numpy()
+		})
