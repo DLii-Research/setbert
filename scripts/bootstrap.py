@@ -189,11 +189,11 @@ def init(argv, job_info, arg_defs=None, **kwargs):
 	# Create the configuration
 	__job_config, config = __create_config(argv, job_info["job_type"], arg_defs)
 
-	# Set the random generation seeds
-	set_seed(config.seed)
-
 	# initialize W&B
 	__init_wandb(__job_config, config, **job_info, **kwargs)
+
+    # Set the random generation seeds
+	set_seed(wandb.run.config.seed)
 
 	# Return the resulting configuration
 	return __job_config, wandb.run.config
@@ -205,8 +205,7 @@ def set_seed(seed):
 	"""
 	global __seed
 	__seed = seed
-	np.random.seed(seed)
-	tf.random.set_seed(seed)
+	tf.keras.utils.set_random_seed(seed)
 
 
 def run_safely(fn, *args, **kwargs):

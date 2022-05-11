@@ -41,7 +41,8 @@ def load_dataset(config, datadir, length, kmer):
 		batches_per_epoch=config.batches_per_epoch,
 		augment=config.data_augment,
 		balance=config.data_balance,
-		include_1mer=True)
+		include_1mer=True,
+        rng=bootstrap.rng())
 	return dataset
 
 
