@@ -37,10 +37,11 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 		if balance:
 			self.sample_lengths[:] = np.min(self.sample_lengths)
 
+		# Sequence augmentation/clipping
 		if self.augment:
-			self.augment_fn = self.augment_sequence
+			self.augment_offset_fn = self.compute_augmented_offset
 		else:
-			self.augment_fn = self.clip_sequence
+			self.augment_offset_fn = lambda *_: 0
 
 		# Shuffle the indices
 		self.shuffle()
@@ -56,16 +57,16 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 		lengths = self.sample_lengths[self.sample_indices]
 		self.sequence_indices = (lengths * self.rng.uniform(size=shape)).astype(int)
 
-	def augment_sequence(self, sequence):
-		offset = self.rng.integers(len(sequence) - self.length + 1)
+		# Augmented offsets
+		if self.augment:
+			self.augment_offsets = self.rng.uniform(size=shape)
+
+	def compute_augmented_offset(self, sequence_len, batch_index, sequence_index):
+		offset = self.augment_offsets[batch_index][sequence_index]
+		return int(offset * (sequence_len - self.length + 1))
+
+	def clip_sequence(self, sequence, offset=0):
 		return sequence[offset:offset+self.length]
-
-	def clip_sequence(self, sequence):
-		return sequence[:self.length]
-
-	def random_sequence(self, sample_idx):
-		idx = self.rng.integers(self.sample_lengths[sample_idx])
-		return self.samples[sample_idx][str(idx)]
 
 	def __len__(self):
 		return self.batches_per_epoch
@@ -75,7 +76,8 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 		sample_indices = self.sample_indices[batch_index]
 		for i in range(self.batch_size):
 			sequence = self.samples[sample_indices[i]][str(self.sequence_indices[batch_index][i])]
-			batch[i] = np.frombuffer(self.augment_fn(sequence), dtype=np.uint8)
+			offset = self.augment_offset_fn(len(sequence), batch_index, i)
+			batch[i] = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
 		return batch
 
 	def on_epoch_end(self):
@@ -95,7 +97,6 @@ class DnaKmerSequenceGenerator(DnaSequenceGenerator):
 			self.modify = lambda batch: self.to_kmers(batch)
 
 	def to_kmers(self, batch):
-		shape = np.shape(batch)
 		result = np.zeros((self.batch_size, self.seq_len), dtype=np.int32)
 		for i, j in enumerate(reversed(range(self.kmer))):
 			result += batch[:,j:j + self.seq_len] * 5**i
