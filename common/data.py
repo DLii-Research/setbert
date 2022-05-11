@@ -16,13 +16,13 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 	A DNA sequence generator for Keras models
 	"""
 	def __init__(self,
-				 samples,
-				 length,
-				 batch_size=32,
-				 batches_per_epoch=128,
-				 augment=True,
-				 balance=False,
-				 rng=None):
+	             samples,
+	             length,
+	             batch_size=32,
+	             batches_per_epoch=128,
+	             augment=True,
+	             balance=False,
+	             rng=None):
 		super().__init__()
 		self.samples = [shelve.open(s) for s in samples]
 		self.sample_lengths = np.array([len(s) for s in self.samples])
@@ -83,10 +83,23 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 	def on_epoch_end(self):
 		self.shuffle()
 
+	def __del__(self):
+		for sample in self.samples:
+			sample.close()
+
 
 class DnaKmerSequenceGenerator(DnaSequenceGenerator):
-	def __init__(self, *args, kmer=1, include_1mer=False, **kwargs):
-		super().__init__(*args, **kwargs)
+	def __init__(self,
+	             samples,
+	             length,
+				 kmer=1,
+	             batch_size=32,
+	             batches_per_epoch=128,
+	             augment=True,
+	             balance=False,
+				 include_1mer=False,
+	             rng=None):
+		super().__init__(samples, length, batch_size, batches_per_epoch, augment, balance, rng)
 		self.kmer = kmer
 		self.include_1mer = include_1mer
 		self.seq_len = self.length - self.kmer + 1
