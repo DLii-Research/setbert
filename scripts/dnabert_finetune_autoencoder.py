@@ -10,7 +10,7 @@ from common.utils import str_to_bool
 
 def define_arguments(parser):
 	# Pretrained model
-	parser.add_argument("--pretrained-model-artifact", type=str, default=None, required=True)
+	parser.add_argument("--pretrained-model-artifact", type=str, default=None)
 	parser.add_argument("--pretrained-model-file", type=str, default=bootstrap.DEFAULT_MODEL_FILE)
 
 	# Architecture settings
@@ -56,8 +56,9 @@ def load_datasets(config, length, kmer):
 
 def create_model(config):
 	# Fetch the pretrained DNABERT model
-	artifact_path = bootstrap.use_model(config.pretrained_model_artifact)
-	pretrain_path = os.path.join(artifact_path, config.pretrained_model_file)
+	if config.pretrained_model_artifact is not None:
+		artifact_path = bootstrap.use_model(config.pretrained_model_artifact)
+	pretrain_path = os.path.join(artifact_path or "", config.pretrained_model_file)
 
 	# Create the model
 	base = dnabert.DnaBertPretrainModel.load(pretrain_path).base
@@ -85,6 +86,7 @@ def create_model(config):
 
 
 def load_model(path):
+	print("Loading previous model...")
 	return dnabert.DnaBertAutoencoderModel.load(path)
 
 
@@ -124,7 +126,7 @@ def train(config, model_path=None):
 def main(argv):
 	# Job Information
 	job_info = {
-		"name": "dnabert-finetune",
+		"name": "dnabert-finetune-autoencoder",
 		"job_type": bootstrap.JobType.Finetune,
 		"group": "dnabert/finetune/autoencoder"
 	}
@@ -135,6 +137,7 @@ def main(argv):
 	# If this is a resumed run, we need to fetch the latest model run
 	model_path = None
 	if bootstrap.is_resumed():
+		print("Restoring previous model...")
 		model_path = bootstrap.restore_dir(config.save_to)
 
 	# Train the model if necessary
