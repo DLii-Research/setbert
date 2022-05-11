@@ -58,7 +58,7 @@ def mds_stress_analysis(dist_mat, dims, metric=True, seed=None, workers=1, **kwa
 		stresses = pool.map(MdsStressAnalysisProcess(
 			dist_mat, metric=metric, random_state=seed, **kwargs
 		), dims)
-	return dims, stresses
+	return dims, (1 - np.cumsum(stresses) / np.sum(stresses))
 
 # Pool Processing Helper Classes  ------------------------------------------------------------------
 
@@ -78,6 +78,6 @@ class MdsStressAnalysisProcess:
 		self.kwargs = kwargs
 
 	def __call__(self, dim):
-		mds = MDS(n_components=dim, **self.kwargs)
+		mds = MDS(n_components=dim, dissimilarity="precomputed", **self.kwargs)
 		mds.fit_transform(self.dist_mat)
 		return mds.stress_
