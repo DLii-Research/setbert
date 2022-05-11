@@ -157,7 +157,7 @@ class DnaBertEncoderModel(CustomModel):
 
     def build_model(self):
         return keras.Sequential([
-            keras.layers.Input(self.base.input_shape[1:]),
+            keras.layers.Input((self.base.length - self.base.kmer + 1,)),
             self.base,
             keras.layers.Lambda(lambda x: x[:,0,:])
         ])
