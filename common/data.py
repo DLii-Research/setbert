@@ -1,37 +1,41 @@
+from lmdbm import Lmdb
 import numpy as np
 import os
-import re
 import tensorflow.keras as keras
-import shelve
 
-def find_shelves(path, prepend_path=False):
-	files = set([os.path.splitext(f)[0] for f in os.listdir(path) if re.match(r'.*\.(?:db|dat)$', f)])
+
+def find_dbs(path, prepend_path=False):
+	files = sorted([f for f in os.listdir(path) if f.endswith('.db')])
 	if prepend_path:
-		return sorted([os.path.join(path, os.path.splitext(f)[0]) for f in files])
-	return sorted(list(files))
+		return [os.path.join(path, f) for f in files]
+	return files
 
 
 class DnaSequenceGenerator(keras.utils.Sequence):
 	"""
 	A DNA sequence generator for Keras models
 	"""
-	def __init__(self,
-	             samples,
-	             length,
-	             batch_size=32,
-	             batches_per_epoch=128,
-	             augment=True,
-	             balance=False,
-	             rng=None):
+	def __init__(
+		self,
+		samples,
+		sequence_length,
+		batch_size=32,
+		batches_per_epoch=128,
+		augment=True,
+		balance=False,
+		include_labels=False,
+		rng=None
+	):
 		super().__init__()
-		self.samples = [shelve.open(s) for s in samples]
+		self.samples = [Lmdb.open(s) for s in samples]
 		self.sample_lengths = np.array([len(s) for s in self.samples])
 		self.num_samples = len(self.samples)
-		self.length = length
+		self.sequence_length = sequence_length
 		self.augment = augment
 		self.batch_size = batch_size
 		self.batches_per_epoch = batches_per_epoch
 		self.balance = balance
+		self.include_labels = include_labels
 		self.rng = rng if rng is not None else np.random.default_rng()
 
 		if balance:
@@ -61,22 +65,29 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 		if self.augment:
 			self.augment_offsets = self.rng.uniform(size=shape)
 
-	def compute_augmented_offset(self, sequence_len, batch_index, sequence_index):
-		offset = self.augment_offsets[batch_index][sequence_index]
-		return int(offset * (sequence_len - self.length + 1))
+	def compute_augmented_offset(self, sequence_len, augment_index):
+		offset = self.augment_offsets[augment_index]
+		return int(offset * (sequence_len - self.sequence_length + 1))
 
 	def clip_sequence(self, sequence, offset=0):
-		return sequence[offset:offset+self.length]
+		return sequence[offset:offset+self.sequence_length]
 
 	def __len__(self):
 		return self.batches_per_epoch
 
 	def __getitem__(self, batch_index):
-		batch = np.empty((self.batch_size, self.length), dtype=np.int32)
+		batch = self.generate_batch(batch_index)
+		if self.include_labels:
+			return (batch, self.sample_indices[batch_index])
+		return batch
+
+	def generate_batch(self, batch_index):
+		batch = np.empty((self.batch_size, self.sequence_length), dtype=np.int32)
 		sample_indices = self.sample_indices[batch_index]
+		sequence_indices = self.sequence_indices[batch_index]
 		for i in range(self.batch_size):
-			sequence = self.samples[sample_indices[i]][str(self.sequence_indices[batch_index][i])]
-			offset = self.augment_offset_fn(len(sequence), batch_index, i)
+			sequence = self.samples[sample_indices[i]][str(sequence_indices[i]).encode()]
+			offset = self.augment_offset_fn(len(sequence), augment_index=(batch_index, i))
 			batch[i] = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
 		return batch
 
@@ -88,33 +99,60 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 			sample.close()
 
 
-class DnaKmerSequenceGenerator(DnaSequenceGenerator):
-	def __init__(self,
-	             samples,
-	             length,
-				 kmer=1,
-	             batch_size=32,
-	             batches_per_epoch=128,
-	             augment=True,
-	             balance=False,
-				 include_1mer=False,
-	             rng=None):
-		super().__init__(samples, length, batch_size, batches_per_epoch, augment, balance, rng)
-		self.kmer = kmer
-		self.include_1mer = include_1mer
-		self.seq_len = self.length - self.kmer + 1
+class DnaSampleGenerator(DnaSequenceGenerator):
+	def __init__(
+		self,
+		samples,
+		subsample_length,
+		sequence_length,
+		batch_size=32,
+		batches_per_epoch=128,
+		augment=True,
+		balance=False,
+		include_labels=False,
+		rng=None
+	):
+		self.subsample_length = subsample_length
+		self.sequence_indices = np.empty(
+			(batches_per_epoch, batch_size, subsample_length),
+			dtype=np.int32)
 
-		if self.include_1mer:
-			self.modify = lambda batch: (self.to_kmers(batch), batch)
-		else:
-			self.modify = lambda batch: self.to_kmers(batch)
+		super().__init__(
+			samples=samples,
+			sequence_length=sequence_length,
+			batch_size=batch_size,
+			batches_per_epoch=batches_per_epoch,
+			augment=augment,
+			balance=balance,
+			include_labels=include_labels,
+			rng=rng)
 
-	def to_kmers(self, batch):
-		result = np.zeros((self.batch_size, self.seq_len), dtype=np.int32)
-		for i, j in enumerate(reversed(range(self.kmer))):
-			result += batch[:,j:j + self.seq_len] * 5**i
-		return result
+	def shuffle(self):
+		self.sample_indices = self.rng.integers(
+			self.num_samples,
+			size=(self.batches_per_epoch, self.batch_size))
 
-	def __getitem__(self, _):
-		batch = super().__getitem__(_)
-		return self.modify(batch)
+		lengths = self.sample_lengths[self.sample_indices]
+		for i in range(self.batches_per_epoch):
+			for j in range(self.batch_size):
+				self.sequence_indices[i,j] = self.rng.choice(
+					np.arange(lengths[i,j]),
+					self.subsample_length,
+					replace=False)
+
+		# Augmented offsets
+		if self.augment:
+			self.augment_offsets = self.rng.uniform(
+				size=(self.batches_per_epoch, self.batch_size, self.subsample_length))
+
+	def generate_batch(self, batch_index):
+		batch = np.empty((self.batch_size, self.subsample_length, self.sequence_length), dtype=np.int32)
+		sample_indices = self.sample_indices[batch_index]
+		sequence_indices = self.sequence_indices[batch_index]
+		for i in range(self.batch_size):
+			sample = self.samples[sample_indices[i]]
+			for j in range(self.subsample_length):
+				sequence = sample[str(sequence_indices[i,j]).encode()]
+				offset = self.augment_offset_fn(len(sequence), (batch_index, i, j))
+				batch[i,j] = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
+		return batch
