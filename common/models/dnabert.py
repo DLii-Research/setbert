@@ -2,7 +2,10 @@ import tensorflow as tf
 import tensorflow.keras as keras
 from . import CustomModel
 from .. core.custom_objects import CustomObject
-from .. layers import RelativeTransformerBlock
+from .. layers import InvertMask, ContiguousMask, EmbeddingWithClassToken, SplitClassToken, \
+                      RelativeTransformerBlock
+
+# Model Definitions --------------------------------------------------------------------------------
 
 @CustomObject
 class DnaBertModel(CustomModel):
@@ -20,11 +23,8 @@ class DnaBertModel(CustomModel):
         self.model = self.build_model()
 
     def build_model(self):
-        y = x = keras.layers.Input((self.length - self.kmer + 1,))
-        y = keras.layers.Embedding(5**self.kmer + 1, output_dim=self.embed_dim)(y)
-        class_token = keras.layers.Lambda(lambda x: tf.tile(tf.constant([[0]]), (tf.shape(x)[0],1)))(y)
-        class_token = keras.layers.Embedding(input_dim=1, output_dim=self.embed_dim)(class_token)
-        y = keras.layers.Concatenate(axis=1)([class_token,y])
+        y = x = keras.layers.Input((self.length - self.kmer + 1,), dtype=tf.int32)
+        y = EmbeddingWithClassToken(5**self.kmer + 1, embed_dim=self.embed_dim, mask_zero=True)(y)
         for _ in range(self.stack):
             y = RelativeTransformerBlock(embed_dim=self.embed_dim,
                                          num_heads=self.num_heads,
@@ -56,17 +56,16 @@ class DnaBertPretrainModel(CustomModel):
     def __init__(self, base, mask_ratio=0.15, **kwargs):
         super().__init__(**kwargs)
         self.base = base
+        self.masking = ContiguousMask(mask_ratio)
         self.model = self.build_model()
 
-        self.seq_len = base.length - base.kmer + 1
-        self.num_tokens = 5**base.kmer
-        self.mask_ratio = tf.Variable(mask_ratio, trainable=False, name="Mask_Ratio")
-        self.mask_len = tf.Variable(int(base.length*mask_ratio), trainable=False, name="Mask_Length")
-
     def build_model(self):
-        y = x = keras.layers.Input((self.base.length - self.base.kmer + 1,))
+        y = x = keras.layers.Input((self.base.length - self.base.kmer + 1,), dtype=tf.int32)
+        y = keras.layers.Lambda(lambda x: x + 1)(y) # Make room for mask
+        y = self.masking(y)
         y = self.base(y)
-        y = keras.layers.Lambda(lambda x: x[:,1:,:])(y)
+        _, y = SplitClassToken()(y)
+        y = InvertMask()(y)
         y = keras.layers.Dense(5**self.base.kmer)(y)
         return keras.Model(x, y)
 
@@ -75,64 +74,6 @@ class DnaBertPretrainModel(CustomModel):
             kwargs["loss"] = keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         super().compile(**kwargs)
 
-    def random_mask(self, batch_size):
-        offset = tf.random.uniform(shape=(), maxval=self.seq_len - self.mask_len, dtype=tf.int32)
-        mask = tf.zeros((batch_size, self.mask_len), dtype=tf.int32)
-        mask = tf.pad(mask, [[0, 0], [offset, self.seq_len - self.mask_len - offset]], "CONSTANT", constant_values=1)
-        return offset, mask
-
-    def set_mask_ratio(self, ratio):
-        self.mask_ratio.assign(ratio)
-        self.mask_len.assign(tf.cast(self.seq_len*ratio), dtype=tf.int32)
-
-    def train_step(self, batch):
-        batch_size = tf.shape(batch)[0]
-
-        # Mask contiguous blocks
-        mask_offset, mask = self.random_mask(batch_size)
-        batch_masked = mask*batch - (mask - 1)*tf.fill(tf.shape(batch), self.num_tokens + 1)
-
-        # Make predictions and compute loss
-        with tf.GradientTape() as tape:
-            y_pred = self(batch_masked, training=True)
-
-            # Only keep the masked elements
-            y_pred = y_pred[:,mask_offset:mask_offset+self.mask_len]
-            y = batch[:,mask_offset:mask_offset+self.mask_len]
-
-            # Compute the loss
-            loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
-
-        # Update the weights
-        grads = tape.gradient(loss, self.trainable_variables)
-        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
-
-        # Update the metrics
-        self.compiled_metrics.update_state(y, y_pred)
-
-        return {m.name: m.result() for m in self.metrics}
-
-    def test_step(self, batch):
-        batch_size = tf.shape(batch)[0]
-
-        # Mask contiguous blocks
-        mask_offset, mask = self.random_mask(batch_size)
-        batch_masked = mask*batch - (mask - 1)*tf.fill(tf.shape(batch), self.num_tokens + 1)
-
-        pred = self(batch_masked)
-
-        # Only keep the masked elements
-        y_pred = pred[:,mask_offset:mask_offset+self.mask_len]
-        y = batch[:,mask_offset:mask_offset+self.mask_len]
-
-        # Update the loss
-        self.compiled_loss(y, y_pred, regularization_losses=self.losses)
-
-        # Update the metrics
-        self.compiled_metrics.update_state(y, y_pred)
-
-        return {m.name: m.result() for m in self.metrics}
-
     def call(self, inputs, training=None):
         return self.model(inputs, training=training)
 
@@ -140,7 +81,7 @@ class DnaBertPretrainModel(CustomModel):
         config = super().get_config()
         config.update({
             "base": self.base,
-            "mask_ratio": self.mask_ratio.numpy()
+            "mask_ratio": self.masking.mask_ratio.numpy()
         })
         return config
 
@@ -153,17 +94,12 @@ class DnaBertEncoderModel(CustomModel):
     def __init__(self, base, **kwargs):
         super().__init__(**kwargs)
         self.base = base
-        self.model = self.build_model()
-
-    def build_model(self):
-        return keras.Sequential([
-            keras.layers.Input((self.base.length - self.base.kmer + 1,)),
-            self.base,
-            keras.layers.Lambda(lambda x: x[:,0,:])
-        ])
+        self.split_token = SplitClassToken()
 
     def call(self, inputs, training=None):
-        return self.model(inputs, training=training)
+        embedded = self.base(inputs + 1, training=training)
+        token, _ = self.split_token(embedded)
+        return token
 
     def get_config(self):
         config = super().get_config()

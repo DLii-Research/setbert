@@ -4,7 +4,7 @@ import sys
 
 import bootstrap
 from common.callbacks import LearningRateStepScheduler
-from common.data import find_shelves, DnaKmerSequenceGenerator
+from common.data import find_dbs, DnaSequenceGenerator
 from common.models import dnabert
 from common.utils import str_to_bool
 
@@ -34,15 +34,17 @@ def define_arguments(parser):
 
 
 def load_dataset(config, datadir):
-	samples = find_shelves(datadir, prepend_path=True)
-	dataset = DnaKmerSequenceGenerator(
+	samples = find_dbs(datadir, prepend_path=True)
+	dataset = DnaSequenceGenerator(
 		samples=samples,
-		length=config.length,
+		sequence_length=config.length,
 		kmer=config.kmer,
 		batch_size=config.batch_size,
 		batches_per_epoch=config.batches_per_epoch,
 		augment=config.data_augment,
 		balance=config.data_balance,
+		include_labels=True,
+		use_batch_as_labels=True,
 		rng=bootstrap.rng())
 	return dataset
 
