@@ -1,6 +1,7 @@
 from lmdbm import Lmdb
 import numpy as np
 import os
+import tensorflow as tf
 import tensorflow.keras as keras
 
 
@@ -19,23 +20,27 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 		self,
 		samples,
 		sequence_length,
+		kmer=1,
 		batch_size=32,
 		batches_per_epoch=128,
 		augment=True,
 		balance=False,
 		include_labels=False,
+		use_batch_as_labels=False,
 		rng=None
 	):
 		super().__init__()
-		self.samples = [Lmdb.open(s) for s in samples]
+		self.samples = [Lmdb.open(s, lock=False) for s in samples]
 		self.sample_lengths = np.array([len(s) for s in self.samples])
 		self.num_samples = len(self.samples)
 		self.sequence_length = sequence_length
+		self.kmer = kmer
 		self.augment = augment
 		self.batch_size = batch_size
 		self.batches_per_epoch = batches_per_epoch
 		self.balance = balance
 		self.include_labels = include_labels
+		self.use_batch_as_labels = use_batch_as_labels
 		self.rng = rng if rng is not None else np.random.default_rng()
 
 		if balance:
@@ -46,6 +51,12 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 			self.augment_offset_fn = self.compute_augmented_offset
 		else:
 			self.augment_offset_fn = lambda *_: 0
+
+		if self.kmer > 1:
+			self.kmer_kernel = 5**np.arange(self.kmer)
+			self.to_kmers = lambda x: np.convolve(x, self.kmer_kernel, mode="valid")
+		else:
+			self.to_kmers = lambda x: x
 
 		# Shuffle the indices
 		self.shuffle()
@@ -77,18 +88,21 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 
 	def __getitem__(self, batch_index):
 		batch = self.generate_batch(batch_index)
-		if self.include_labels:
-			return (batch, self.sample_indices[batch_index])
-		return batch
+		if not self.include_labels:
+			return batch
+		if self.use_batch_as_labels:
+			return (batch, batch)
+		return (batch, self.sample_indices[batch_index])
 
 	def generate_batch(self, batch_index):
-		batch = np.empty((self.batch_size, self.sequence_length), dtype=np.int32)
+		batch = np.empty((self.batch_size, self.sequence_length - self.kmer + 1), dtype=np.int32)
 		sample_indices = self.sample_indices[batch_index]
 		sequence_indices = self.sequence_indices[batch_index]
 		for i in range(self.batch_size):
 			sequence = self.samples[sample_indices[i]][str(sequence_indices[i]).encode()]
 			offset = self.augment_offset_fn(len(sequence), augment_index=(batch_index, i))
-			batch[i] = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
+			sequence = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
+			batch[i] = self.to_kmers(sequence)
 		return batch
 
 	def on_epoch_end(self):
@@ -146,7 +160,9 @@ class DnaSampleGenerator(DnaSequenceGenerator):
 				size=(self.batches_per_epoch, self.batch_size, self.subsample_length))
 
 	def generate_batch(self, batch_index):
-		batch = np.empty((self.batch_size, self.subsample_length, self.sequence_length), dtype=np.int32)
+		batch = np.empty(
+			(self.batch_size, self.subsample_length, self.sequence_length - self.kmer + 1),
+			dtype=np.int32)
 		sample_indices = self.sample_indices[batch_index]
 		sequence_indices = self.sequence_indices[batch_index]
 		for i in range(self.batch_size):
@@ -154,5 +170,6 @@ class DnaSampleGenerator(DnaSequenceGenerator):
 			for j in range(self.subsample_length):
 				sequence = sample[str(sequence_indices[i,j]).encode()]
 				offset = self.augment_offset_fn(len(sequence), (batch_index, i, j))
-				batch[i,j] = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
+				sequence = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
+				batch[i,j] = self.to_kmers(sequence)
 		return batch
