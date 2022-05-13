@@ -9,16 +9,17 @@ from . core.custom_objects import CustomObject, register_custom_objects
 
 register_custom_objects(st.custom_layers())
 
-# Layer Definitions --------------------------------------------------------------------------------
+# DNA-related Layers -------------------------------------------------------------------------------
 
 @CustomObject
 class KmerEncoder(keras.layers.Layer):
 	"""
 	Encode individual base identifiers into kmer identifiers.
 	"""
-	def __init__(self, kmer, overlap=True, padding="VALID", **kwargs):
+	def __init__(self, kmer, include_mask_token=True, overlap=True, padding="VALID", **kwargs):
 		super().__init__(**kwargs)
 		self.kmer = kmer
+		self.include_mask_token = include_mask_token
 		self.overlap = overlap
 		self.padding = padding
 		self.kernel = tf.reshape(5**tf.range(self.kmer, dtype=tf.int32), (-1, 1, 1))
@@ -27,17 +28,70 @@ class KmerEncoder(keras.layers.Layer):
 		stride = 1 if self.overlap else self.kmer
 		inputs = tf.cast(tf.expand_dims(inputs, axis=2), dtype=tf.int32)
 		encoded = tf.nn.conv1d(inputs, self.kernel, stride=stride, padding=self.padding)
+		if self.include_mask_token:
+			encoded += 1
 		return tf.squeeze(encoded)
 
 	def get_config(self):
 		config = super().get_config()
 		config.update({
 			"kmer": self.kmer,
+			"include_mask_token": self.include_mask_token,
 			"overlap": self.overlap,
 			"padding": self.padding
 		})
 		return config
 
+# Utility Layers -----------------------------------------------------------------------------------
+
+@CustomObject
+class ContiguousMask(keras.layers.Layer):
+	"""
+	Mask out contiguous blocks of input tokens (provided as integers)
+	"""
+	def __init__(self, mask_ratio, **kwargs):
+		super().__init__(**kwargs)
+		self.mask_ratio = tf.Variable(
+            mask_ratio, trainable=False, dtype=tf.float32, name="Mask_Ratio")
+
+	def call(self, inputs):
+		batch_size = tf.shape(inputs)[0]
+		seq_len = tf.shape(inputs)[1]
+		mask_len = tf.cast(tf.cast(seq_len, dtype=tf.float32) * self.mask_ratio, dtype=tf.int32)
+
+		# Pick random mask offsets
+		mask_offsets = tf.random.uniform((batch_size,), minval=0, maxval=(seq_len - mask_len + 1), dtype=tf.int32)
+
+		# Construct and the mask
+		left = tf.sequence_mask(mask_offsets, seq_len)
+		right = tf.logical_not(tf.sequence_mask(mask_offsets + mask_len, seq_len))
+		mask = tf.cast(tf.logical_or(left, right), dtype=inputs.dtype)
+
+        # Return the masked inputs, and the mask
+		return mask * inputs
+
+	def get_config(self):
+		config = super().get_config()
+		config.update({
+			"mask_ratio": self.mask_ratio.numpy()
+		})
+		return config
+
+@CustomObject
+class InvertMask(keras.layers.Layer):
+	"""
+	Invert the current mask. Useful for DNABERT models where we *want* to pay attention to the
+	masked elements.
+	"""
+	def compute_mask(self, inputs, mask=None):
+		if mask is None:
+			return None
+		return tf.logical_not(mask)
+
+	def call(self, inputs):
+		return inputs + 0 # hacky, but without modification
+
+# Miscellaneous ------------------------------------------------------------------------------------
 
 @CustomObject
 class GumbelSoftmax(keras.layers.Layer):
@@ -112,6 +166,8 @@ class GumbelSoftmax(keras.layers.Layer):
 		return dict(list(base_config.items()) + list(config.items()))
 
 
+# Multi-head Attention -----------------------------------------------------------------------------
+
 @CustomObject
 class VaswaniMultiHeadAttention(keras.layers.Layer):
 	def __init__(self, embed_dim, num_heads):
@@ -124,6 +180,8 @@ class VaswaniMultiHeadAttention(keras.layers.Layer):
 		self.fc_k = keras.layers.Dense(embed_dim)
 		self.fc_v = keras.layers.Dense(embed_dim)
 		self.att = self.compute_multihead_attention
+
+		self.supports_masking = True
 
 	def compute_multihead_attention(self, q, k, v):
 		"""
@@ -202,6 +260,7 @@ class RelativeMultiHeadAttention(keras.layers.MultiHeadAttention):
 		attention_output = tf.einsum(self._combine_equation, attention_scores_dropout, value)
 		return attention_output, attention_scores
 
+# Transformers -------------------------------------------------------------------------------------
 
 class BaseTransformerBlock(keras.layers.Layer):
 	def __init__(self, embed_dim, num_heads, ff_dim, ff_activation="gelu", gating=None, dropout_rate=0.1, prenorm=False, **kwargs):
@@ -225,6 +284,8 @@ class BaseTransformerBlock(keras.layers.Layer):
 		self.dropout1 = keras.layers.Dropout(dropout_rate)
 		self.dropout2 = keras.layers.Dropout(dropout_rate)
 		self.att = self.create_attention_layer(embed_dim, num_heads)
+
+		self.supports_masking = True
 
 	def create_attention_layer(self, embed_dim, num_heads):
 		raise NotImplemented()
@@ -292,6 +353,7 @@ class RelativeTransformerBlock(BaseTransformerBlock):
 	def create_attention_layer(self, embed_dim, num_heads):
 		return RelativeMultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
 
+# Transformer Utility Layers -----------------------------------------------------------------------
 
 @CustomObject
 class FixedPositionEmbedding(keras.layers.Layer):
@@ -319,40 +381,82 @@ class FixedPositionEmbedding(keras.layers.Layer):
 
 
 @CustomObject
-class ConditionedISAB(keras.layers.Layer):
-	def __init__(self, embed_dim, dim_cond, num_heads, num_anchors, **kwargs):
-		super(ConditionedISAB, self).__init__(**kwargs)
+class EmbeddingWithClassToken(keras.layers.Layer):
+	def __init__(self, num_tokens, embed_dim, mask_zero=False, **kwargs):
+		super().__init__(**kwargs)
+		self.num_tokens = num_tokens
 		self.embed_dim = embed_dim
-		self.dim_cond = dim_cond
-		self.num_heads = num_heads
-		self.num_anchors = num_anchors
-		self.mab1 = st.MAB(embed_dim, num_heads)
-		self.mab2 = st.MAB(embed_dim, num_heads)
-		self.anchor_predict = keras.models.Sequential([
-			keras.layers.Dense(
-				2*dim_cond,
-				input_shape=(dim_cond,),
-				activation="gelu"),
-			tfa.layers.SpectralNormalization(
-				keras.layers.Dense(num_anchors*embed_dim)),
-			keras.layers.Reshape((num_anchors, embed_dim))
-		])
+		self.mask_zero = mask_zero
+		self.token_id = tf.constant([[num_tokens]])
+		self.embedding = keras.layers.Embedding(num_tokens + 1, embed_dim, mask_zero=mask_zero)
 
-	def call(self, inp):
-		inducing_points = self.anchor_predict(inp[1])
-		h = self.mab1(inducing_points, inp[0])
-		return self.mab2(inp[0], h)
+	def call(self, inputs):
+		token = tf.tile(self.token_id, (tf.shape(inputs)[0], 1))
+		return self.embedding(tf.concat([token, inputs], axis=1))
 
 	def get_config(self):
-		config = super(ConditionedISAB, self).get_config()
+		config = super().get_config()
 		config.update({
+			"num_tokens": self.num_tokens,
 			"embed_dim": self.embed_dim,
-			"dim_cond": self.dim_cond,
-			"num_heads": self.num_heads,
-			"num_anchors": self.num_anchors
+			"mask_zero": self.mask_zero
 		})
 		return config
 
+
+@CustomObject
+class SplitClassToken(keras.layers.Layer):
+	def __init__(self, **kwargs):
+		super().__init__(**kwargs)
+
+	def compute_mask(self, inputs, mask=None):
+		if mask is None:
+			return None
+		return None, mask[:,1:]
+
+	def call(self, inputs):
+		token = inputs[:,0,:]
+		others = inputs[:,1:,:]
+		return token, others
+
+
+# @CustomObject
+# class ConditionedISAB(keras.layers.Layer):
+# 	def __init__(self, embed_dim, dim_cond, num_heads, num_anchors, **kwargs):
+# 		super(ConditionedISAB, self).__init__(**kwargs)
+# 		self.embed_dim = embed_dim
+# 		self.dim_cond = dim_cond
+# 		self.num_heads = num_heads
+# 		self.num_anchors = num_anchors
+# 		self.mab1 = st.MAB(embed_dim, num_heads)
+# 		self.mab2 = st.MAB(embed_dim, num_heads)
+# 		self.anchor_predict = keras.models.Sequential([
+# 			keras.layers.Dense(
+# 				2*dim_cond,
+# 				input_shape=(dim_cond,),
+# 				activation="gelu"),
+# 			tfa.layers.SpectralNormalization(
+# 				keras.layers.Dense(num_anchors*embed_dim)),
+# 			keras.layers.Reshape((num_anchors, embed_dim))
+# 		])
+
+# 	def call(self, inp):
+# 		inducing_points = self.anchor_predict(inp[1])
+# 		h = self.mab1(inducing_points, inp[0])
+# 		return self.mab2(inp[0], h)
+
+# 	def get_config(self):
+# 		config = super(ConditionedISAB, self).get_config()
+# 		config.update({
+# 			"embed_dim": self.embed_dim,
+# 			"dim_cond": self.dim_cond,
+# 			"num_heads": self.num_heads,
+# 			"num_anchors": self.num_anchors
+# 		})
+# 		return config
+
+
+# Set Generation -----------------------------------------------------------------------------------
 
 @CustomObject
 class SampleSet(keras.layers.Layer):
