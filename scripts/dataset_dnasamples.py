@@ -1,7 +1,7 @@
+from lmdbm import Lmdb
 import numpy as np
 import os
 import re
-import shelve
 import sys
 
 import bootstrap
@@ -50,11 +50,15 @@ def process_sample(inpath, outpath, filename, val_split, test_split, shuffle):
 		for end, folder in zip(ends, folders):
 			if start == end:
 				continue
-			store = shelve.open(os.path.join(outpath, folder, filename))
+
+			# Lmdb batched-updates are orders of magnitude faster than single writes
+			sequence_map = {}
 			for key, i in enumerate(range(start, end)):
 				sequence = sequences[indices[i]]
-				store[str(key)] = parse_sequence(sequence)
-			store.close()
+				sequence_map[str(key).encode()] = parse_sequence(sequence)
+
+			with Lmdb.open(os.path.join(outpath, folder, filename), "c") as store:
+				store.update(sequence_map)
 			start = end
 
 
@@ -67,7 +71,7 @@ def process_season(path, season, val_split, test_split, shuffle, writedir):
 			continue
 		date = re.search(FASTQ_REGEX, file)[0]
 		inpath = os.path.join(path, file)
-		filename = f"{season.lower()}_{date}"
+		filename = f"{season.lower()}_{date}.db"
 		process_sample(inpath, writedir, filename, val_split, test_split, shuffle)
 
 

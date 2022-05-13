@@ -13,6 +13,8 @@ A repository of deep learning models for DNA samples and sequences.
 
 In order to run these models, you'll need to install the necessary dependencies from my other repositories linked below.
 
+- [LMDBM](https://pypi.org/project/lmdbm/)
+- [Tensorflow](https://www.tensorflow.org/)
 - [tf-utils](https://github.com/DLii-Research/tf-utils)
 - [tf-set-transformer](https://github.com/DLii-Research/tf-set-transformer)
 - [Weights & Biases](https://wandb.ai)
