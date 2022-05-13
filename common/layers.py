@@ -12,6 +12,34 @@ register_custom_objects(st.custom_layers())
 # Layer Definitions --------------------------------------------------------------------------------
 
 @CustomObject
+class KmerEncoder(keras.layers.Layer):
+	"""
+	Encode individual base identifiers into kmer identifiers.
+	"""
+	def __init__(self, kmer, overlap=True, padding="VALID", **kwargs):
+		super().__init__(**kwargs)
+		self.kmer = kmer
+		self.overlap = overlap
+		self.padding = padding
+		self.kernel = tf.reshape(5**tf.range(self.kmer, dtype=tf.int32), (-1, 1, 1))
+
+	def call(self, inputs):
+		stride = 1 if self.overlap else self.kmer
+		inputs = tf.cast(tf.expand_dims(inputs, axis=2), dtype=tf.int32)
+		encoded = tf.nn.conv1d(inputs, self.kernel, stride=stride, padding=self.padding)
+		return tf.squeeze(encoded)
+
+	def get_config(self):
+		config = super().get_config()
+		config.update({
+			"kmer": self.kmer,
+			"overlap": self.overlap,
+			"padding": self.padding
+		})
+		return config
+
+
+@CustomObject
 class GumbelSoftmax(keras.layers.Layer):
 	"""
 	Stolen from: https://github.com/gugarosa/nalp/blob/master/nalp/models/layers/gumbel_softmax.py
