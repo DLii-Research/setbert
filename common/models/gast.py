@@ -7,6 +7,9 @@ from .. layers import SampleSet
 
 @CustomObject
 class GastGenerator(CustomModel):
+	"""
+	A generic generator model based on the GAST framework.
+	"""
 	def __init__(
 		self,
 		max_set_size,
@@ -85,3 +88,26 @@ class GastGenerator(CustomModel):
 
 	def call(self, inputs, training=None):
 		return self.model(inputs, training=training)
+
+	def get_config(self):
+		config = super().get_config()
+		config.update({
+			"max_set_size": self.max_set_size,
+			"noise_dim": self.noise_dim,
+			"embed_dim": self.embed_dim,
+			"latent_dim": self.latent_dim,
+			"stack": self.stack,
+			"num_heads": self.num_heads,
+			"num_anchors": self.num_anchors,
+			"use_keras_mha": self.use_keras_mha,
+			"use_spectral_norm": self.use_spectral_norm,
+			"activation": self.activation,
+			"cond_dim": self.cond_dim,
+			"ff_dim": self.ff_dim,
+			"mlp_dim": self.mlp_dim,
+			"pre_layernorm": self.pre_layernorm,
+			"include_class": self.include_class,
+			"num_classes": self.num_classes,
+			"class_dim": self.class_dim
+		})
+		return config
