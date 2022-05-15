@@ -119,11 +119,13 @@ class DnaSampleGenerator(DnaSequenceGenerator):
 		samples,
 		subsample_length,
 		sequence_length,
+		kmer=1,
 		batch_size=32,
 		batches_per_epoch=128,
 		augment=True,
 		balance=False,
 		include_labels=False,
+		use_batch_as_labels=False,
 		rng=None
 	):
 		self.subsample_length = subsample_length
@@ -134,11 +136,13 @@ class DnaSampleGenerator(DnaSequenceGenerator):
 		super().__init__(
 			samples=samples,
 			sequence_length=sequence_length,
+			kmer=kmer,
 			batch_size=batch_size,
 			batches_per_epoch=batches_per_epoch,
 			augment=augment,
 			balance=balance,
 			include_labels=include_labels,
+			use_batch_as_labels=use_batch_as_labels,
 			rng=rng)
 
 	def shuffle(self):
