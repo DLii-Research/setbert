@@ -1,6 +1,6 @@
 import tensorflow as tf
 import tensorflow.keras as keras
-from settransformer import ConditionedSetAttentionBlock, spectral_dense
+import settransformer as st
 from . import CustomModel
 from .. core.custom_objects import CustomObject
 from .. layers import SampleSet
@@ -69,7 +69,7 @@ class GastGenerator(CustomModel):
 		# Conditioned sample set
 		y = SampleSet(self.max_set_size, self.embed_dim)(cardinality)
 		for i in range(self.stack):
-			y1 = ConditionedSetAttentionBlock(
+			y1 = st.ConditionedSetAttentionBlock(
 				embed_dim=self.latent_dim,
 				num_heads=self.num_heads,
 				num_anchors=self.num_anchors,
@@ -77,10 +77,10 @@ class GastGenerator(CustomModel):
 				ff_activation=self.activation,
 				use_keras_mha=self.use_keras_mha,
 				use_spectral_norm=self.use_spectral_norm,
-				is_final=(i == self.stack - 1),
-				prelayernorm=self.pre_layernorm)(y, condition)
+				prelayernorm=self.pre_layernorm,
+				is_final=(i == self.stack - 1))(y, condition)
 			y = keras.layers.Add()((y, y1))
-		y = spectral_dense(self.latent_dim, use_spectral_norm=self.use_spectral_norm)(y)
+		y = st.spectral_dense(self.latent_dim, use_spectral_norm=self.use_spectral_norm)(y)
 
 		if self.include_class:
 			return keras.Model((noise, label, cardinality), y)
@@ -111,3 +111,87 @@ class GastGenerator(CustomModel):
 			"class_dim": self.class_dim
 		})
 		return config
+
+
+@CustomObject
+class GastDiscriminator(CustomModel):
+	def __init__(
+		self,
+		latent_dim,
+		embed_dim,
+		stack,
+		num_heads,
+		num_anchors,
+		use_keras_mha=False,
+		use_spectral_norm=True,
+		activation="relu",
+		ff_dim=None,
+		pre_layernorm=True,
+		num_classes=1,
+		**kwargs
+	):
+		super().__init__(**kwargs)
+		self.latent_dim = latent_dim
+		self.embed_dim = embed_dim
+		self.stack = stack
+		self.num_heads = num_heads
+		self.num_anchors = num_anchors
+		self.use_keras_mha = use_keras_mha
+		self.use_spectral_norm = use_spectral_norm
+		self.activation = activation
+		self.ff_dim = ff_dim
+		self.pre_layernorm = pre_layernorm
+		self.num_classes = num_classes
+
+		self.model = self.build_model()
+
+	def build_model(self):
+		y = x = keras.layers.Input((None, self.latent_dim))
+
+		y = keras.layers.Dense(self.embed_dim)(y)
+
+		# Encode the original set
+		enc = [st.InducedSetEncoder(
+			num_seeds=1,
+			embed_dim=self.embed_dim,
+			num_heads=self.num_heads,
+
+			ff_dim=self.ff_dim,
+			ff_activation=self.activation,
+			prelayernorm=self.pre_layernorm,
+			is_final=True,
+			use_keras_mha=self.use_keras_mha,
+			use_spectral_norm=self.use_spectral_norm)(y)]
+
+		# Pass the set through ISABs, encoding along the way
+		for i in range(self.stack):
+			y1 = st.InducedSetAttentionBlock(
+				embed_dim=self.embed_dim,
+				num_heads=self.num_heads,
+				num_induce=self.num_anchors,
+				ff_dim=self.ff_dim,
+				ff_activation=self.activation,
+				use_keras_mha=self.use_keras_mha,
+				use_spectral_norm=self.use_spectral_norm,
+				prelayernorm=self.pre_layernorm,
+				is_final=(i == self.stack - 1))(y)
+			y = keras.layers.Add()((y, y1))
+			enc.append(st.InducedSetEncoder(
+				num_seeds=1,
+				embed_dim=self.embed_dim,
+				num_heads=self.num_heads,
+				ff_dim=self.ff_dim,
+				ff_activation=self.activation,
+				prelayernorm=self.pre_layernorm,
+				is_final=True,
+				use_keras_mha=self.use_keras_mha,
+				use_spectral_norm=self.use_spectral_norm)(y))
+
+		y = keras.layers.Concatenate()(enc)
+		# y = keras.layers.Dense(LATENT_DIM, activation=self.activation)(y)
+		y = keras.layers.Dense(self.num_classes + 1, activation="softmax")(y)
+
+		return keras.Model(x, y)
+
+	def call(self, inputs, training=None):
+		return self.model(inputs, training)
