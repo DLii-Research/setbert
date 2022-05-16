@@ -9,11 +9,18 @@ A repository of deep learning models for DNA samples and sequences.
 - DNABERT
 - DNABERT Autoencoder
 
+### GAN
+
+- Vanilla GAN
+- Conditional GAN
+- Generative Adversarial Set Transformers (GAST)
+- DNAGAST
+
 ## Dependencies
 
 In order to run these models, you'll need to install the necessary dependencies from my other repositories linked below.
 
-- [LMDBM](https://pypi.org/project/lmdbm/)
+- [LMDBM (modified)](https://github.com/SirDavidLudwig/lmdb-python-dbm)
 - [Tensorflow](https://www.tensorflow.org/)
 - [tf-utils](https://github.com/DLii-Research/tf-utils)
 - [tf-set-transformer](https://github.com/DLii-Research/tf-set-transformer)
