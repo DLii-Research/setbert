@@ -112,7 +112,7 @@ class GumbelSoftmax(keras.layers.Layer):
 			axis (int): Axis to perform the softmax operation.
 		"""
 
-		super(GumbelSoftmax, self).__init__(**kwargs)
+		super().__init__(**kwargs)
 
 		# Defining a property for holding the intended axis
 		self.axis = axis
@@ -161,7 +161,7 @@ class GumbelSoftmax(keras.layers.Layer):
 		"""
 
 		config = {'axis': self.axis}
-		base_config = super(GumbelSoftmax, self).get_config()
+		base_config = super().get_config()
 
 		return dict(list(base_config.items()) + list(config.items()))
 
@@ -171,7 +171,7 @@ class GumbelSoftmax(keras.layers.Layer):
 @CustomObject
 class VaswaniMultiHeadAttention(keras.layers.Layer):
 	def __init__(self, embed_dim, num_heads):
-		super(VaswaniMultiHeadAttention, self).__init__()
+		super().__init__()
 		self.embed_dim = embed_dim
 		self.num_heads = num_heads
 		assert self.embed_dim % self.num_heads == 0, "Embed dim must be divisible by the number of heads"
@@ -191,7 +191,6 @@ class VaswaniMultiHeadAttention(keras.layers.Layer):
 		Reference: https://github.com/juho-lee/set_transformer/blob/master/modules.py#L20-L33
 		"""
 		q, k, v = self.fc_q(q), self.fc_k(k), self.fc_v(v)
-		num_batches = tf.shape(q)[0]
 
 		# Divide for multi-head attention
 		q_split = tf.concat(tf.split(q, self.num_heads, 2), 0)
@@ -212,7 +211,7 @@ class VaswaniMultiHeadAttention(keras.layers.Layer):
 @CustomObject
 class RelativeMultiHeadAttention(keras.layers.MultiHeadAttention):
 	def __init__(self, max_seq_len=None, **kwargs):
-		super(RelativeMultiHeadAttention, self).__init__(**kwargs)
+		super().__init__(**kwargs)
 		self._max_seq_len = max_seq_len
 
 	def build(self, input_shape):
@@ -222,10 +221,10 @@ class RelativeMultiHeadAttention(keras.layers.MultiHeadAttention):
 		self._rel_embeds = self.add_weight("relative_embeddings",
 										   shape=(self._max_seq_len, self._key_dim),
 										   initializer="glorot_uniform", trainable=True)
-		return super(RelativeMultiHeadAttention, self).build(input_shape)
+		return super().build(input_shape)
 
 	def get_config(self):
-		config = super(RelativeMultiHeadAttention, self).get_config()
+		config = super().get_config()
 		config.update({
 			"max_seq_len": self._max_seq_len
 		})
@@ -264,7 +263,7 @@ class RelativeMultiHeadAttention(keras.layers.MultiHeadAttention):
 
 class BaseTransformerBlock(keras.layers.Layer):
 	def __init__(self, embed_dim, num_heads, ff_dim, ff_activation="gelu", gating=None, dropout_rate=0.1, prenorm=False, **kwargs):
-		super(BaseTransformerBlock, self).__init__(**kwargs)
+		super().__init__(**kwargs)
 		self.ffn = keras.Sequential(
 			[keras.layers.Dense(ff_dim, activation=ff_activation),
 			 keras.layers.Dense(embed_dim),]
@@ -316,7 +315,7 @@ class BaseTransformerBlock(keras.layers.Layer):
 		return self.att_postnorm(inputs, training)
 
 	def get_config(self):
-		config = super(BaseTransformerBlock, self).get_config()
+		config = super().get_config()
 		config.update({
 			"embed_dim": self.embed_dim,
 			"num_heads": self.num_heads,
@@ -333,7 +332,7 @@ class BaseTransformerBlock(keras.layers.Layer):
 class TransformerBlock(BaseTransformerBlock):
 	def __init__(self, *args, use_vaswani_mha=False, **kwargs):
 		self.use_vaswani_mha = use_vaswani_mha
-		super(TransformerBlock, self).__init__(*args, **kwargs)
+		super().__init__(*args, **kwargs)
 
 	def create_attention_layer(self, embed_dim, num_heads):
 		if self.use_vaswani_mha:
@@ -341,7 +340,7 @@ class TransformerBlock(BaseTransformerBlock):
 		return keras.layers.MultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
 
 	def get_config(self):
-		config = super(TransformerBlock, self).get_config()
+		config = super().get_config()
 		config.update({
 			"use_vaswani_mha": self.use_vaswani_mha
 		})
@@ -358,7 +357,7 @@ class RelativeTransformerBlock(BaseTransformerBlock):
 @CustomObject
 class FixedPositionEmbedding(keras.layers.Layer):
 	def __init__(self, length, embed_dim):
-		super(FixedPositionEmbedding, self).__init__()
+		super().__init__()
 		self.length = length
 		self.embed_dim = embed_dim
 
@@ -372,7 +371,7 @@ class FixedPositionEmbedding(keras.layers.Layer):
 		return x + self.positions
 
 	def get_config(self):
-		config = super(FixedPositionEmbedding, self).get_config()
+		config = super().get_config()
 		config.update({
 			"length": self.length,
 			"embed_dim": self.embed_dim
@@ -419,49 +418,12 @@ class SplitClassToken(keras.layers.Layer):
 		others = inputs[:,1:,:]
 		return token, others
 
-
-# @CustomObject
-# class ConditionedISAB(keras.layers.Layer):
-# 	def __init__(self, embed_dim, dim_cond, num_heads, num_anchors, **kwargs):
-# 		super(ConditionedISAB, self).__init__(**kwargs)
-# 		self.embed_dim = embed_dim
-# 		self.dim_cond = dim_cond
-# 		self.num_heads = num_heads
-# 		self.num_anchors = num_anchors
-# 		self.mab1 = st.MAB(embed_dim, num_heads)
-# 		self.mab2 = st.MAB(embed_dim, num_heads)
-# 		self.anchor_predict = keras.models.Sequential([
-# 			keras.layers.Dense(
-# 				2*dim_cond,
-# 				input_shape=(dim_cond,),
-# 				activation="gelu"),
-# 			tfa.layers.SpectralNormalization(
-# 				keras.layers.Dense(num_anchors*embed_dim)),
-# 			keras.layers.Reshape((num_anchors, embed_dim))
-# 		])
-
-# 	def call(self, inp):
-# 		inducing_points = self.anchor_predict(inp[1])
-# 		h = self.mab1(inducing_points, inp[0])
-# 		return self.mab2(inp[0], h)
-
-# 	def get_config(self):
-# 		config = super(ConditionedISAB, self).get_config()
-# 		config.update({
-# 			"embed_dim": self.embed_dim,
-# 			"dim_cond": self.dim_cond,
-# 			"num_heads": self.num_heads,
-# 			"num_anchors": self.num_anchors
-# 		})
-# 		return config
-
-
 # Set Generation -----------------------------------------------------------------------------------
 
 @CustomObject
 class SampleSet(keras.layers.Layer):
 	def __init__(self, max_set_size, embed_dim, **kwargs):
-		super(SampleSet, self).__init__(**kwargs)
+		super().__init__(**kwargs)
 		self.max_set_size = max_set_size
 		self.embed_dim = embed_dim
 
@@ -497,7 +459,7 @@ class SampleSet(keras.layers.Layer):
 		return sampled_set
 
 	def get_config(self):
-		config = super(SampleSet, self).get_config()
+		config = super().get_config()
 		config.update({
 			"max_set_size": self.max_set_size,
 			"embed_dim": self.embed_dim

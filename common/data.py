@@ -66,7 +66,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 		shape = (self.batches_per_epoch, self.batch_size)
 
 		# Select random samples
-		self.sample_indices = self.rng.integers(self.num_samples, size=shape)
+		self.sample_indices = self.rng.integers(self.num_samples, size=shape, dtype=np.int32)
 
 		# Select random sequence indices
 		lengths = self.sample_lengths[self.sample_indices]
@@ -148,7 +148,8 @@ class DnaSampleGenerator(DnaSequenceGenerator):
 	def shuffle(self):
 		self.sample_indices = self.rng.integers(
 			self.num_samples,
-			size=(self.batches_per_epoch, self.batch_size))
+			size=(self.batches_per_epoch, self.batch_size),
+			dtype=np.int32)
 
 		lengths = self.sample_lengths[self.sample_indices]
 		for i in range(self.batches_per_epoch):
@@ -156,7 +157,7 @@ class DnaSampleGenerator(DnaSequenceGenerator):
 				self.sequence_indices[i,j] = self.rng.choice(
 					np.arange(lengths[i,j]),
 					self.subsample_length,
-					replace=False)
+					replace=False,)
 
 		# Augmented offsets
 		if self.augment:
