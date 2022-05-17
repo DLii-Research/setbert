@@ -193,7 +193,8 @@ def init(argv, job_info, arg_defs=None, **kwargs):
 	__init_wandb(__job_config, config, **job_info, **kwargs)
 
     # Set the random generation seeds
-	set_seed(wandb.run.config.seed)
+	if wandb.run.config.seed is not None:
+		set_seed(wandb.run.config.seed)
 
 	# Return the resulting configuration
 	return __job_config, wandb.run.config
