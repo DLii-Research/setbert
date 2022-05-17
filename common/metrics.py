@@ -22,17 +22,37 @@ def chamfer_distance_kdtree(a: KDTree, b: KDTree, p=1, workers=1):
 	d_ba = np.mean(b.query(a.data, p=p, workers=workers)[0])
 	return (d_ab + d_ba)/2.0
 
-def chamfer_distance_matrix(sets, p=1, workers=1, fn=chamfer_distance_kdtree):
+def chamfer_distance_matrix(sets, p=1, workers=1, indices=None, fn=chamfer_distance_kdtree, result=None):
 	"""
 	Compute the distance matrix between sets using Chamfer distance
 	"""
 	n = len(sets)
-	indices = np.array(list(itertools.combinations(np.arange(n), 2)))
-	result = np.zeros((n, n))
+	if indices is None:
+		indices = np.array(list(itertools.combinations(np.arange(n), 2)))
+	if result is None:
+		result = np.zeros((n, n))
 	with multiprocessing.Pool(workers) as pool:
 		result[tuple(indices.T[::-1])] = \
 		result[tuple(indices.T)] = pool.map(ChamferDistanceProcessor(fn, sets, p), indices)
 	return result
+
+def chamfer_distance_extend_matrix(sets_a, sets_b, dist_mat=None, p=1, workers=1, fn=chamfer_distance_kdtree):
+	"""
+	Efficiently extend a Chamfer distance matrix by adding the list of sets in set_b
+	"""
+	sets = sets_a + sets_b
+	n = len(sets)
+
+	if len(dist_mat) != n:
+		m = n - len(dist_mat)
+		dist_mat = np.pad(dist_mat, ((0, m), (0, m)))
+
+	indices_a = np.arange(len(sets_a))
+	indices_b = np.arange(len(sets_b)) + len(sets_a)
+	indices = np.array(
+		list(itertools.product(indices_a, indices_b)) +
+		list(itertools.combinations(indices_b, 2)))
+	return chamfer_distance_matrix(sets, p=p, workers=workers, indices=indices, fn=fn, result=dist_mat)
 
 # Metric Multidimensional-scaling (MDS) ------------------------------------------------------------
 
