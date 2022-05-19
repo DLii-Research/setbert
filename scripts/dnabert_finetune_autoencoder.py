@@ -3,7 +3,7 @@ import tensorflow.keras as keras
 import sys
 
 import bootstrap
-from common.data import find_shelves, DnaKmerSequenceGenerator
+from common.data import find_dbs, DnaLabelType, DnaSequenceGenerator
 from common.models import dnabert
 from common.utils import str_to_bool
 
@@ -11,7 +11,6 @@ from common.utils import str_to_bool
 def define_arguments(parser):
 	# Pretrained model
 	parser.add_argument("--pretrained-model-artifact", type=str, default=None)
-	parser.add_argument("--pretrained-model-file", type=str, default=bootstrap.DEFAULT_MODEL_FILE)
 
 	# Architecture settings
 	parser.add_argument("--embed-dim", type=int, default=128)
@@ -32,16 +31,16 @@ def define_arguments(parser):
 
 
 def load_dataset(config, datadir, length, kmer):
-	samples = find_shelves(datadir, prepend_path=True)
-	dataset = DnaKmerSequenceGenerator(
+	samples = find_dbs(datadir, prepend_path=True)
+	dataset = DnaSequenceGenerator(
 		samples=samples,
-		length=length,
+		sequence_length=length,
 		kmer=kmer,
 		batch_size=config.batch_size,
 		batches_per_epoch=config.batches_per_epoch,
 		augment=config.data_augment,
 		balance=config.data_balance,
-		include_1mer=True,
+		labels=DnaLabelType.OneMer,
         rng=bootstrap.rng())
 	return dataset
 
@@ -56,9 +55,7 @@ def load_datasets(config, length, kmer):
 
 def create_model(config):
 	# Fetch the pretrained DNABERT model
-	if config.pretrained_model_artifact is not None:
-		artifact_path = bootstrap.use_model(config.pretrained_model_artifact)
-	pretrain_path = os.path.join(artifact_path or "", config.pretrained_model_file)
+	pretrain_path = bootstrap.use_model(config.pretrained_model_artifact)
 
 	# Create the model
 	base = dnabert.DnaBertPretrainModel.load(pretrain_path).base
@@ -146,7 +143,7 @@ def main(argv):
 
 	# Upload an artifact of the model if requested
 	if job_config.log_artifacts:
-		bootstrap.log_model_artifact(job_info["name"])
+		bootstrap.log_model_artifact(bootstrap.group().replace('/', '-'))
 
 
 if __name__ == "__main__":

@@ -352,6 +352,13 @@ def job_config():
 	return __job_config
 
 
+def group():
+	"""
+	Fetch the current group name
+	"""
+	return wandb.run.group
+
+
 def strategy():
 	"""
 	Fetch the current strategy instance.

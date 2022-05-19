@@ -4,7 +4,7 @@ import sys
 
 import bootstrap
 from common.callbacks import LearningRateStepScheduler
-from common.data import find_dbs, DnaSequenceGenerator
+from common.data import find_dbs, DnaLabelType, DnaSequenceGenerator
 from common.models import dnabert
 from common.utils import str_to_bool
 
@@ -43,8 +43,7 @@ def load_dataset(config, datadir):
 		batches_per_epoch=config.batches_per_epoch,
 		augment=config.data_augment,
 		balance=config.data_balance,
-		include_labels=True,
-		use_batch_as_labels=True,
+		labels=DnaLabelType.Kmer,
 		rng=bootstrap.rng())
 	return dataset
 
@@ -154,7 +153,7 @@ def main(argv):
 	# Upload an artifact of the model if requested
 	if job_config.log_artifacts:
 		print("Logging artifact...")
-		bootstrap.log_model_artifact(job_info["name"])
+		bootstrap.log_model_artifact(bootstrap.group().replace('/', '-'))
 
 
 if __name__ == "__main__":
