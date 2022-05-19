@@ -1,3 +1,4 @@
+import enum
 from lmdbm import Lmdb
 import numpy as np
 import os
@@ -12,10 +13,17 @@ def find_dbs(path, prepend_path=False):
 	return files
 
 
+class DnaLabelType(enum.Enum):
+	SampleIds = enum.auto()
+	OneMer = enum.auto()
+	KMer = enum.auto()
+
+
 class DnaSequenceGenerator(keras.utils.Sequence):
 	"""
 	A DNA sequence generator for Keras models
 	"""
+
 	def __init__(
 		self,
 		samples,
@@ -25,8 +33,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 		batches_per_epoch=128,
 		augment=True,
 		balance=False,
-		include_labels=False,
-		use_batch_as_labels=False,
+		labels=None,
 		rng=None
 	):
 		super().__init__()
@@ -39,8 +46,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 		self.batch_size = batch_size
 		self.batches_per_epoch = batches_per_epoch
 		self.balance = balance
-		self.include_labels = include_labels
-		self.use_batch_as_labels = use_batch_as_labels
+		self.labels = labels
 		self.rng = rng if rng is not None else np.random.default_rng()
 
 		if balance:
@@ -57,6 +63,17 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 			self.to_kmers = lambda x: np.convolve(x, self.kmer_kernel, mode="valid")
 		else:
 			self.to_kmers = lambda x: x
+
+		# Included label types in the returned batches
+		if self.labels == DnaLabelType.SampleIds:
+			self.post_process_batch = lambda batch, batch_index: (
+				self.batch_to_kmers(batch), self.sample_indices[batch_index])
+		elif self.labels == DnaLabelType.OneMer:
+			self.post_process_batch = lambda batch, batch_index: (self.batch_to_kmers(batch), batch)
+		elif self.labels == DnaLabelType.KMer:
+			self.post_process_batch = lambda batch, _: 2*(self.batch_to_kmers(batch),)
+		else:
+			self.post_process_batch = lambda batch, _: self.batch_to_kmers(batch)
 
 		# Shuffle the indices
 		self.shuffle()
@@ -83,26 +100,27 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 	def clip_sequence(self, sequence, offset=0):
 		return sequence[offset:offset+self.sequence_length]
 
+	def batch_to_kmers(self, batch):
+		result = np.empty((self.batch_size, self.sequence_length - self.kmer + 1))
+		for i, sequence in enumerate(batch):
+			result[i] = self.to_kmers(sequence)
+		return result
+
 	def __len__(self):
 		return self.batches_per_epoch
 
 	def __getitem__(self, batch_index):
 		batch = self.generate_batch(batch_index)
-		if not self.include_labels:
-			return batch
-		if self.use_batch_as_labels:
-			return (batch, batch)
-		return (batch, self.sample_indices[batch_index])
+		return self.post_process_batch(batch, batch_index)
 
 	def generate_batch(self, batch_index):
-		batch = np.empty((self.batch_size, self.sequence_length - self.kmer + 1), dtype=np.int32)
+		batch = np.empty((self.batch_size, self.sequence_length), dtype=np.int32)
 		sample_indices = self.sample_indices[batch_index]
 		sequence_indices = self.sequence_indices[batch_index]
 		for i in range(self.batch_size):
 			sequence = self.samples[sample_indices[i]][str(sequence_indices[i]).encode()]
 			offset = self.augment_offset_fn(len(sequence), augment_index=(batch_index, i))
-			sequence = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
-			batch[i] = self.to_kmers(sequence)
+			batch[i] = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
 		return batch
 
 	def on_epoch_end(self):
