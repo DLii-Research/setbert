@@ -22,7 +22,7 @@ class KmerEncoder(keras.layers.Layer):
 		self.include_mask_token = include_mask_token
 		self.overlap = overlap
 		self.padding = padding
-		self.kernel = tf.reshape(5**tf.range(self.kmer, dtype=tf.int32), (-1, 1, 1))
+		self.kernel = tf.reshape(5**tf.range(self.kmer - 1, -1, -1, dtype=tf.int32), (-1, 1, 1))
 
 	def call(self, inputs):
 		stride = 1 if self.overlap else self.kmer
