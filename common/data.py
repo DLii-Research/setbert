@@ -7,13 +7,42 @@ import tensorflow.keras as keras
 
 
 def find_dbs(path, prepend_path=False):
+	"""
+	Find LMDB database files within the given path.
+	"""
 	files = sorted([f for f in os.listdir(path) if f.endswith('.db')])
 	if prepend_path:
 		return [os.path.join(path, f) for f in files]
 	return files
 
 
+def random_subsamples(samples, sequence_length, subsample_size, subsamples_per_sample=1, augment=True, balance=False, rng=None):
+	"""
+	Generate random subsamples of the given samples.
+	"""
+	samples = [Lmdb.open(s) for s in samples]
+	sample_lengths = np.array([len(s) for s in samples])
+	if balance:
+		sample_lengths = np.min(sample_lengths)
+
+	result = np.empty((len(samples), subsamples_per_sample, subsample_size, sequence_length))
+	augments = rng.uniform(size=result.shape[:-1]) if augment else np.zeros_like(result.shape[:-1])
+	for i, sample in enumerate(samples):
+		all_indices = np.arange(sample_lengths[i])
+		for j in range(subsamples_per_sample):
+			indices = rng.choice(all_indices, subsample_size, replace=False)
+			for k, sequence_index in enumerate(indices):
+				sequence = sample[str(sequence_index)]
+				offset = int(augments[i,j,k] * (len(sequence) - sequence_length + 1))
+				result[i,j,k] = np.frombuffer(
+					sequence[offset:sequence_length+offset], dtype=np.uint8)
+	return result
+
+
 class DnaLabelType(enum.Enum):
+	"""
+	DNA label type to return for DNA sequence/sample generators
+	"""
 	SampleIds = enum.auto()
 	OneMer = enum.auto()
 	KMer = enum.auto()
@@ -101,7 +130,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 		return sequence[offset:offset+self.sequence_length]
 
 	def batch_to_kmers(self, batch):
-		result = np.empty((self.batch_size, self.sequence_length - self.kmer + 1))
+		result = np.empty((len(batch), self.sequence_length - self.kmer + 1))
 		for i, sequence in enumerate(batch):
 			result[i] = self.to_kmers(sequence)
 		return result
@@ -142,8 +171,7 @@ class DnaSampleGenerator(DnaSequenceGenerator):
 		batches_per_epoch=128,
 		augment=True,
 		balance=False,
-		include_labels=False,
-		use_batch_as_labels=False,
+		labels=None,
 		rng=None
 	):
 		self.subsample_length = subsample_length
@@ -159,8 +187,7 @@ class DnaSampleGenerator(DnaSequenceGenerator):
 			batches_per_epoch=batches_per_epoch,
 			augment=augment,
 			balance=balance,
-			include_labels=include_labels,
-			use_batch_as_labels=use_batch_as_labels,
+			labels=labels,
 			rng=rng)
 
 	def shuffle(self):
@@ -182,9 +209,15 @@ class DnaSampleGenerator(DnaSequenceGenerator):
 			self.augment_offsets = self.rng.uniform(
 				size=(self.batches_per_epoch, self.batch_size, self.subsample_length))
 
+	def batch_to_kmers(self, batch):
+		result = np.empty((len(batch), self.subsample_length, self.sequence_length - self.kmer + 1))
+		for i, subsample in enumerate(batch):
+			result[i] = super().batch_to_kmers(subsample)
+		return result
+
 	def generate_batch(self, batch_index):
 		batch = np.empty(
-			(self.batch_size, self.subsample_length, self.sequence_length - self.kmer + 1),
+			(self.batch_size, self.subsample_length, self.sequence_length),
 			dtype=np.int32)
 		sample_indices = self.sample_indices[batch_index]
 		sequence_indices = self.sequence_indices[batch_index]
@@ -193,6 +226,5 @@ class DnaSampleGenerator(DnaSequenceGenerator):
 			for j in range(self.subsample_length):
 				sequence = sample[str(sequence_indices[i,j]).encode()]
 				offset = self.augment_offset_fn(len(sequence), (batch_index, i, j))
-				sequence = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
-				batch[i,j] = self.to_kmers(sequence)
+				batch[i,j] = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
 		return batch
