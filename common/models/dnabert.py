@@ -2,7 +2,7 @@ import tensorflow as tf
 import tensorflow.keras as keras
 from . import CustomModel
 from .. core.custom_objects import CustomObject
-from .. layers import InvertMask, ContiguousMask, EmbeddingWithClassToken, SplitClassToken, \
+from .. layers import InvertMask, ContiguousMask, EmbeddingWithClassToken, KmerEncoder, SplitClassToken, \
                       RelativeTransformerBlock
 
 # Model Definitions --------------------------------------------------------------------------------
@@ -91,12 +91,17 @@ class DnaBertEncoderModel(CustomModel):
     """
     The DNABERT encoder/embedding model architecture
     """
-    def __init__(self, base, **kwargs):
+    def __init__(self, base, use_kmer_encoder=False, **kwargs):
         super().__init__(**kwargs)
         self.base = base
+        self.use_kmer_encoder = use_kmer_encoder
         self.split_token = SplitClassToken()
+        if self.use_kmer_encoder:
+            self.kmer_encoder = KmerEncoder(base.kmer, include_mask_token=False)
 
     def call(self, inputs, training=None):
+        if self.use_kmer_encoder:
+            inputs = self.kmer_encoder(inputs)
         embedded = self.base(inputs + 1, training=training)
         token, _ = self.split_token(embedded)
         return token
@@ -104,7 +109,8 @@ class DnaBertEncoderModel(CustomModel):
     def get_config(self):
         config = super().get_config()
         config.update({
-            "base": self.base
+            "base": self.base,
+            "use_kmer_encoder": self.use_kmer_encoder
         })
         return config
 
