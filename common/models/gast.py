@@ -233,7 +233,7 @@ class GastDiscriminator(CustomModel, IConditionalGanComponent):
         return keras.Model(x, y)
 
     def call(self, inputs, training=None):
-        return self.model(inputs, training)
+        return self.model(inputs, training=training)
 
     def get_config(self):
         config = super().get_config()
