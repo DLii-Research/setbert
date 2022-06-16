@@ -10,7 +10,7 @@ def encode_sequence(sequence: str):
     """
     Encode a DNA sequence into an integer vector representation.
     """
-    return np.array([encode_sequence.m[base] for base in sequence])
+    return np.array([encode_sequence.m[base] for base in sequence], dtype=np.uint8)
 
 
 @static_vars(m = [c for c in BASES])

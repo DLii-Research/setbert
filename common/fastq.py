@@ -1,8 +1,24 @@
+from . import dna
+
 def read(buffer):
     lines = buffer.readlines()
     if len(lines) > 0 and type(lines[0]) is bytes:
         lines = [line.decode() for line in lines]
     return [FastqEntry.from_lines(lines[i:i+4]) for i in range(0, len(lines), 4)]
+
+
+def write(buffer, entries):
+    buffer.write("\n".join([str(entry) for entry in entries]))
+    
+
+def to_encoded_dict(entries, encoding=33):
+    result = {}
+    for i, entry in enumerate(entries):
+        sequence = dna.encode_sequence(entry.sequence)
+        scores = dna.decode_phred(entry.quality_scores, encoding=encoding)
+        result[bytes(f"{i}".encode())] = sequence.tobytes()
+        result[bytes(f"{i}_scores".encode())] = scores.tobytes()
+    return result
 
 
 def parse_fastq_sequence_id(sequence_id):
