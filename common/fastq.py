@@ -9,15 +9,15 @@ def read(buffer):
 
 def write(buffer, entries):
     buffer.write("\n".join([str(entry) for entry in entries]))
-    
+
 
 def to_encoded_dict(entries, encoding=33):
     result = {}
     for i, entry in enumerate(entries):
         sequence = dna.encode_sequence(entry.sequence)
         scores = dna.decode_phred(entry.quality_scores, encoding=encoding)
-        result[bytes(f"{i}".encode())] = sequence.tobytes()
-        result[bytes(f"{i}_scores".encode())] = scores.tobytes()
+        result[f"{i}".encode()] = sequence.tobytes()
+        # result[f"{i}_scores".encode()] = scores.tobytes()
     return result
 
 
