@@ -35,6 +35,9 @@ class DnaBertModel(CustomModel):
     def call(self, inputs, training=None):
         return self.model(inputs, training=training)
 
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0], self.length, self.embed_dim)
+
     def get_config(self):
         config = super().get_config()
         config.update({
@@ -77,6 +80,9 @@ class DnaBertPretrainModel(CustomModel):
     def call(self, inputs, training=None):
         return self.model(inputs, training=training)
 
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0], self.base.length, 5**self.base.kmer)
+
     def get_config(self):
         config = super().get_config()
         config.update({
@@ -105,6 +111,9 @@ class DnaBertEncoderModel(CustomModel):
         embedded = self.base(inputs + 1, training=training)
         token, _ = self.split_token(embedded)
         return token
+
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0], self.base.embed_dim)
 
     def get_config(self):
         config = super().get_config()
@@ -144,6 +153,9 @@ class DnaBertDecoderModel(CustomModel):
 
     def call(self, inputs, training=None):
         return self.model(inputs, training=training)
+
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0], self.length, 5)
 
     def get_config(self):
         config = super().get_config()
