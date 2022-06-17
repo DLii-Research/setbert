@@ -6,14 +6,12 @@ import tensorflow as tf
 import tensorflow.keras as keras
 
 
-def find_dbs(path, prepend_path=False):
+def find_dbs(path):
     """
     Find LMDB database files within the given path.
     """
-    files = sorted([f for f in os.listdir(path) if f.endswith('.db')])
-    if prepend_path:
-        return [os.path.join(path, f) for f in files]
-    return files
+    files = [d for d, _, fs in os.walk(path) for f in fs if f == "data.mdb"]
+    return sorted(files)
 
 
 def random_subsamples(samples, sequence_length, subsample_size, subsamples_per_sample=1, augment=True, balance=False, rng=None):
