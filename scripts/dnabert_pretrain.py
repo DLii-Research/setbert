@@ -34,7 +34,9 @@ def define_arguments(parser):
 
 
 def load_dataset(config, datadir):
-    samples = find_dbs(datadir, prepend_path=True)
+    samples = find_dbs(datadir)
+    for sample in samples:
+        print(sample)
     dataset = DnaSequenceGenerator(
         samples=samples,
         sequence_length=config.length,
@@ -43,7 +45,7 @@ def load_dataset(config, datadir):
         batches_per_epoch=config.batches_per_epoch,
         augment=config.data_augment,
         balance=config.data_balance,
-        labels=DnaLabelType.Kmer,
+        labels=DnaLabelType.KMer,
         rng=bootstrap.rng())
     return dataset
 
@@ -132,6 +134,7 @@ def main(argv):
     job_info = {
         "name": "dnabert-pretrain",
         "job_type": bootstrap.JobType.Pretrain,
+        "project": os.environ["WANDB_PROJECT_DNABERT_PRETRAIN"],
         "group": "dnabert/pretrain"
     }
 
@@ -157,4 +160,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv) or 0)
+    sys.exit(bootstrap.boot(main, (sys.argv,)) or 0)

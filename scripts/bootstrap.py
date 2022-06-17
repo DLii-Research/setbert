@@ -177,14 +177,18 @@ def add_job_argument(parser, *args, **kwargs):
     __job_args.append(arg.dest)
     return arg
 
+def boot(callback, args):
+    """
+    Boot a job by loading all required dependencies before init.
+    """
+    dotenv.load_dotenv()
+    return callback(*args)
+
 def init(argv, job_info, arg_defs=None, **kwargs):
     """
     Initialize a new job.
     """
     global __job_config
-
-    # Load the environment from the .env file
-    dotenv.load_dotenv()
 
     # Create the configuration
     __job_config, config = __create_config(argv, job_info["job_type"], arg_defs)
