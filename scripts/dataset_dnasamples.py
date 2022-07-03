@@ -1,3 +1,4 @@
+import gzip
 from lmdbm import Lmdb
 import numpy as np
 import os
@@ -6,12 +7,7 @@ import sys
 
 import bootstrap
 
-# A regular expression for recognizing the components of the fastq files
-FASTQ_REGEX = r"(?<=0000_AG_)(\d{4})-(\d{2})-(\d{2})(?=.fastq)"
-
-# Map DNA base calls to integers
-BASE_MAP = {b: i for i, b in enumerate('ACGTN')}
-
+from common import fastq
 
 def define_arguments(parser):
     parser.add_argument("--val-split", type=float, default=0.1)
@@ -19,60 +15,37 @@ def define_arguments(parser):
     parser.add_argument("--shuffle", type=bool, default=True)
 
 
-def encode_base(c):
-    return BASE_MAP[c]
+def split_sample(sample, val_split, test_split):
+    n = len(sample)
+    n_val = int(n*(val_split))
+    n_test = int(n*(test_split))
+    n_train = n - n_val - n_test
+    ends = np.cumsum((0, n_train, n_val, n_test))
+    return (sample[ends[i]:ends[i+1]] for i in range(3))
 
 
-def parse_sequence(sequence):
-    return bytes(list(map(encode_base, sequence.rstrip())))
-
-
-def process_sample(inpath, outpath, filename, val_split, test_split, shuffle):
+def process_fastq_file(inpath, write_path, config):
     """
-    Process a sample by extracting all DNA sequences from the given fastq file
+    Process a FASTQ sample by extracting all DNA sequences it and storing it as an LMDB database.
     """
-    with open(inpath) as f:
-        print(f"{inpath} -> {outpath}")
-        sequences = f.readlines()[1::4]
-        n = len(sequences)
-
-        n_val = int(n*(val_split))
-        n_test = int(n*(test_split))
-        n_train = n - n_val - n_test
-        ends = np.cumsum((n_train, n_val, n_test))
-        folders = ("train", "validation", "test")
-
-        start = 0
-        if shuffle:
-            indices = np.random.permutation(n)
-        else:
-            indices = np.arange(n)
-        for end, folder in zip(ends, folders):
-            if start == end:
+    subpath = re.sub(r"^\.?/[^\/]+\/", "", inpath)
+    subpath = re.sub(r"\.fastq(.gz)?$", "", subpath)
+    open_file = gzip.open if inpath.endswith(".gz") else open
+    with open_file(inpath) as f:
+        print(inpath, end=": ")
+        sample = fastq.read(f)
+        if config.shuffle:
+            sample = [sample[i] for i in bootstrap.rng().permutation(len(sample))]
+        splits = split_sample(sample, config.val_split, config.test_split)
+        split_labels = ("train", "validation", "test")
+        for label, split in zip(split_labels, splits):
+            if len(split) == 0:
                 continue
-
-            # Lmdb batched-updates are orders of magnitude faster than single writes
-            sequence_map = {}
-            for key, i in enumerate(range(start, end)):
-                sequence = sequences[indices[i]]
-                sequence_map[str(key).encode()] = parse_sequence(sequence)
-
-            with Lmdb.open(os.path.join(outpath, folder, filename), "c") as store:
-                store.update(sequence_map)
-            start = end
-
-
-def process_season(path, season, val_split, test_split, shuffle, writedir):
-    """
-    Process a season-folder of samples
-    """
-    for file in os.listdir(path):
-        if not file.endswith(".fastq"):
-            continue
-        date = re.search(FASTQ_REGEX, file)[0]
-        inpath = os.path.join(path, file)
-        filename = f"{season.lower()}_{date}.db"
-        process_sample(inpath, writedir, filename, val_split, test_split, shuffle)
+            outpath = os.path.join(write_path, label, os.path.basename(subpath) + ".db")
+            os.makedirs(os.path.dirname(outpath), exist_ok=True)
+            with Lmdb.open(outpath, 'c') as store:
+                store.update(fastq.to_encoded_dict(sample))
+        print(f"{len(sample)} sequences saved.")
 
 
 def create_dataset(config):
@@ -81,23 +54,14 @@ def create_dataset(config):
     """
     if not os.path.isdir(config.data_path):
         raise Exception(f"Invalid input directory: {config.data_path}")
-
     write_path = bootstrap.data_path("dataset")
 
-    for folder in ("train", "validation", "test"):
-        os.makedirs(os.path.join(write_path, folder), exist_ok=True)
-
-    for season in os.listdir(config.data_path):
-        path = os.path.join(config.data_path, season)
-        if not os.path.isdir(path):
-            continue
-        process_season(
-            path,
-            season,
-            config.val_split,
-            config.test_split,
-            config.shuffle,
-            write_path)
+    for cwd, _, files in os.walk(config.data_path):
+        for file in files:
+            path = os.path.join(cwd, file)
+            if re.match(r".*\.fastq(:?\.gz)?$", path) is None:
+                continue
+            process_fastq_file(path, write_path, config)
 
 
 def main(argv):
@@ -105,7 +69,8 @@ def main(argv):
     job_info = {
         "name": "dataset-dnasamples",
         "job_type": bootstrap.JobType.CreateDataset,
-        "group": "dataset/dnasamples"
+        "project": os.environ["WANDB_PROJECT_DNA_DATASETS"],
+        "group": "dataset/all"
     }
 
     _, config = bootstrap.init(argv, job_info, define_arguments)
@@ -114,7 +79,6 @@ def main(argv):
     if config.seed is not None:
         np.random.seed(config.seed)
 
-    # Create the datasets
     create_dataset(config)
 
     # Log the dataset as an artifact
@@ -126,4 +90,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv) or 0)
+    sys.exit(bootstrap.boot(main, (sys.argv,)) or 0)
