@@ -26,6 +26,7 @@ def define_arguments(parser):
     parser.add_argument("--data-workers", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--sub-batch-size", type=int, default=0)
     parser.add_argument("--mask-ratio", type=float, default=0.15)
     parser.add_argument("--optimizer", type=str, choices=["adam", "nadam"], default="adam")
     parser.add_argument("--lr", type=float, default=4e-4)
@@ -117,6 +118,7 @@ def train(config, model_path=None):
             model.fit,
             train_data,
             validation_data=val_data,
+            subbatch_size=config.sub_batch_size,
             initial_epoch=bootstrap.initial_epoch(),
             epochs=config.epochs,
             callbacks=callbacks,
