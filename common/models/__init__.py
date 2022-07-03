@@ -1,14 +1,14 @@
 import tensorflow as tf
 import tensorflow.keras as keras
 from .. core.custom_objects import CustomObject
-from .. utils import load_model, subbatch_train_step
+from .. utils import load_model, accumulate_train_step
 
 class CustomModel(keras.Model):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.subbatching = True # temporary for testing/debugging
-        self.__subbatch_size = tf.Variable(0, dtype=tf.int32, trainable=False, name="Sub_batch_size")
+        self.__subbatch_size = tf.constant(2**31 - 1, dtype=tf.int32) # max int32
 
     @classmethod
     def from_config(cls, config):
@@ -35,13 +35,14 @@ class CustomModel(keras.Model):
             grads = tape.gradient(loss, self.trainable_weights)
             self.compiled_metrics.update_state(y, y_pred)
             return [], [grads]
-        subbatch_train_step(step, batch, self.subbatch_size, self, self.optimizer)
+        _, (grads,) = accumulate_train_step(step, batch, self.subbatch_size, self)
+        self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
         return {m.name: m.result() for m in self.metrics}
     
     def fit(self, *args, subbatch_size=None, **kwargs):
         if subbatch_size is None or subbatch_size <= 0:
-            subbatch_size = 2**31 - 1 # max int32
-        self.__subbatch_size.assign(subbatch_size)
+            subbatch_size = tf.constant(2**31 - 1, dtype=tf.int32)
+        self.__subbatch_size = subbatch_size
         return super().fit(*args, **kwargs)
     
     @property
