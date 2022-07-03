@@ -3,6 +3,7 @@ import tensorflow.keras as keras
 
 from common.core.custom_objects import CustomObject
 from common.models import CustomModel
+from common.utils import accumulate_train_step
 
 # Interfaces ---------------------------------------------------------------------------------------
 
@@ -243,7 +244,7 @@ class VeeGan(Gan):
     def __init__(self, generator, discriminator, reconstructor, **kwargs):
         super().__init__(generator, discriminator)
         self.reconstructor = reconstructor
-        
+
     def compile(
         self,
         loss, # Sent to the loss object constructor
@@ -264,7 +265,7 @@ class VeeGan(Gan):
             discriminator_metrics,
             force_build,
             **kwargs)
-        
+
     def force_build(self):
         # Force build the model and allow saving. Thanks Keras!
         inp = self.generator.generate_input(1)
@@ -286,8 +287,8 @@ class VeeGan(Gan):
         Compute the likelihood of the reconstructor output
         """
         return -tf.reduce_mean(tf.reduce_sum(y_pred, axis=1))
-        
-    def train_step(self, data):
+    
+    def subbatch_train_step(self, data):
         """
         A robust and expandable version of the standard GAN training procedure
         """
@@ -312,17 +313,38 @@ class VeeGan(Gan):
             recon_input = self.construct_reconstructor_input(fake_input, fake_data)
             recon_output = self.reconstructor(recon_input, training=True).log_prob(fake_input[0])
 
-            g_loss, r_loss, d_loss, metrics = self.compute_metrics(
+            g_loss, r_loss, d_loss = self.compute_metrics(
                 data, fake_input, real_input, fake_output, real_output, recon_output)
 
         # Update gradients
         g_grads = g_tape.gradient(g_loss, self.generator.trainable_variables)
         r_grads = r_tape.gradient(r_loss, self.reconstructor.trainable_variables)
         d_grads = d_tape.gradient(d_loss, self.discriminator.trainable_variables)
+        
+        return [], [g_grads, r_grads, d_grads]
+        
+    def train_step(self, data):
+        """
+        A robust and expandable version of the standard GAN training procedure
+        """
+        if self.subbatching:
+            _, (g_grads, r_grads, d_grads) = accumulate_train_step(
+                self.subbatch_train_step, data, self.subbatch_size,
+                (self.generator, self.reconstructor, self.discriminator))
+        else:
+            _, (g_grads, r_grads, d_grads) = self.subbatch_train_step(data)
         self.g_optimizer.apply_gradients(zip(g_grads, self.generator.trainable_variables))
         self.r_optimizer.apply_gradients(zip(r_grads, self.reconstructor.trainable_variables))
         self.d_optimizer.apply_gradients(zip(d_grads, self.discriminator.trainable_variables))
-
+        
+        # Fetch the metric results
+        metrics = {
+            self.g_loss.name: self.g_loss.result(),
+            self.d_loss.name: self.d_loss.result()
+        }
+        metrics.update({m.name: m.result() for m in self.g_metrics})
+        metrics.update({m.name: m.result() for m in self.d_metrics})
+        
         return metrics
     
     def compute_metrics(self, data, fake_input, real_input, fake_output, real_output, recon_output):
@@ -341,15 +363,7 @@ class VeeGan(Gan):
         y_true, y_pred = self.discriminator_metric_args(data, real_output, fake_output)
         d_loss = self.compute_metrics_for_component(
             y_true, y_pred, self.discriminator_loss, self.d_loss, self.d_metrics)
-
-        # Fetch the metric results
-        metrics = {
-            self.g_loss.name: self.g_loss.result(),
-            self.d_loss.name: self.d_loss.result()
-        }
-        metrics.update({m.name: m.result() for m in self.g_metrics})
-        metrics.update({m.name: m.result() for m in self.d_metrics})
-        return g_loss, r_loss, d_loss, metrics
+        return g_loss, r_loss, d_loss
     
     def get_config(self):
         config = super().get_config()
