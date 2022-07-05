@@ -1,4 +1,5 @@
 import os
+import tensorflow as tf
 import tensorflow.keras as keras
 import sys
 
@@ -25,13 +26,14 @@ def define_arguments(parser):
     parser.add_argument("--data-balance", type=str_to_bool, default=False)
     parser.add_argument("--data-workers", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--batch-size", type=int, default=2000)
+    parser.add_argument("--sub-batch-size", type=int, default=1000)
     parser.add_argument("--optimizer", type=str, choices=["adam", "nadam"], default="adam")
     parser.add_argument("--lr", type=float, default=4e-4)
 
 
 def load_dataset(config, datadir, length, kmer):
-    samples = find_dbs(datadir, prepend_path=True)
+    samples = find_dbs(datadir)
     dataset = DnaSequenceGenerator(
         samples=samples,
         sequence_length=length,
@@ -79,6 +81,8 @@ def create_model(config):
     model.compile(optimizer=optimizer, metrics=[
         keras.metrics.SparseCategoricalAccuracy()
     ])
+    model(tf.zeros((1, encoder.base.length - encoder.base.kmer + 1)))
+    model.summary()
     return model
 
 
@@ -109,6 +113,7 @@ def train(config, model_path=None):
             train_data,
             validation_data=val_data,
             initial_epoch=bootstrap.initial_epoch(),
+            subbatch_size=config.sub_batch_size,
             epochs=config.epochs,
             callbacks=callbacks,
             use_multiprocessing=(config.data_workers > 1),
@@ -123,9 +128,10 @@ def train(config, model_path=None):
 def main(argv):
     # Job Information
     job_info = {
-        "name": "dnabert-finetune-autoencoder",
+        "name": "finetune",
         "job_type": bootstrap.JobType.Finetune,
-        "group": "dnabert/finetune/autoencoder"
+        "project": os.environ["WANDB_PROJECT_DNABERT_AUTOENCODER"],
+        "group": "finetune"
     }
 
     # Initialize the job and load the config
@@ -140,6 +146,8 @@ def main(argv):
     # Train the model if necessary
     if bootstrap.initial_epoch() < config.epochs:
         train(config, model_path)
+    else:
+        print("Skipping training...")
 
     # Upload an artifact of the model if requested
     if job_config.log_artifacts:
@@ -147,4 +155,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv) or 0)
+    sys.exit(bootstrap.boot(main, (sys.argv,)) or 0)
