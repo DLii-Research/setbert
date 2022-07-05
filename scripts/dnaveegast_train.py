@@ -163,11 +163,13 @@ def load_model(path):
 
 
 class DnaGastMdsCallback(keras.callbacks.Callback):
-    def __init__(self, samples, subsample_size, control_subsamples_per_sample, test_subsamples_per_sample, augment=True, balance=False, p=1, workers=1, rng=np.random.default_rng()):
+    def __init__(self, samples, subsample_size, control_subsamples_per_sample, test_subsamples_per_sample, batch_size, encoder_batch_size, augment=True, balance=False, p=1, workers=1, rng=np.random.default_rng()):
         self.samples = samples
         self.subsample_size = subsample_size
         self.control_subsamples_per_sample = control_subsamples_per_sample
         self.test_subsamples_per_sample = test_subsamples_per_sample
+        self.batch_size = batch_size
+        self.encoder_batch_size = encoder_batch_size
         self.augment = augment
         self.balance = balance
         self.p = p
@@ -203,7 +205,7 @@ class DnaGastMdsCallback(keras.callbacks.Callback):
         return self.generator.generate_input(n, labels)
 
     def predict_test_samples(self):
-        samples = self.generator.predict(self.test_input, batch_size=self.model.batch_size)
+        samples = self.generator.predict(self.test_input, batch_size=self.batch_size)
         return [KDTree(s) for s in samples]
 
     def on_train_begin(self, logs=None):
@@ -211,7 +213,7 @@ class DnaGastMdsCallback(keras.callbacks.Callback):
         self.encoder = self.model.encoder
 
         tf.print("Generating control and test sample data")
-        self.control_samples = self.generate_random_subsamples(self.model.encoder_batch_size)
+        self.control_samples = self.generate_random_subsamples(self.encoder_batch_size)
         self.test_input = self.generate_test_input()
 
         tf.print("Computing initial distances")
@@ -270,6 +272,8 @@ def create_callbacks(config, test_samples):
         subsample_size=config.subsample_length,
         control_subsamples_per_sample=config.num_control_subsamples,
         test_subsamples_per_sample=config.num_test_subsamples,
+        batch_size=(config.sub_batch_size if config.sub_batch_size > 0 else config.batch_size),
+        encoder_batch_size=config.encoder_batch_size,
         augment=config.data_augment,
         balance=config.data_balance,
         workers=config.data_workers,
