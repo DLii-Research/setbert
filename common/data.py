@@ -18,7 +18,14 @@ def random_subsamples(samples, sequence_length, subsample_size, subsamples_per_s
     """
     Generate random subsamples of the given samples.
     """
-    samples = [Lmdb.open(s) for s in samples]
+    samples = []
+    for sample in samples:
+        store = Lmdb.open(sample)
+        if len(store) < subsample_size:
+            print(f"Warning: Sample '{sample}' only contains {len(store)} sequences. This sample will not be included.")
+            store.close()
+            continue
+        samples.append(store)
     sample_lengths = np.array([len(s) for s in samples])
     rng = rng if rng is not None else np.random.default_rng()
     if balance:
@@ -65,7 +72,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         rng=None
     ):
         super().__init__()
-        self.samples = [Lmdb.open(s, lock=False) for s in samples]
+        self.samples = self.open_samples(samples)
         self.sample_lengths = np.array([len(s) for s in self.samples])
         self.num_samples = len(self.samples)
         self.sequence_length = sequence_length
@@ -105,6 +112,9 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 
         # Shuffle the indices
         self.shuffle()
+        
+    def open_samples(self, sample_paths):
+        return [Lmdb.open(s, lock=False) for s in sample_paths]
 
     def shuffle(self):
         # Full epoch indices shape
@@ -188,6 +198,17 @@ class DnaSampleGenerator(DnaSequenceGenerator):
             balance=balance,
             labels=labels,
             rng=rng)
+        
+    def open_samples(self, sample_paths):
+        samples = []
+        for sample in sample_paths:
+            store = Lmdb.open(sample, lock=False)
+            if len(store) < self.subsample_length:
+                print(f"Warning: Sample '{sample}' only contains {len(store)} sequences. This sample will not be included.")
+                store.close()
+                continue
+            samples.append(store)
+        return samples
 
     def shuffle(self):
         self.sample_indices = self.rng.integers(
