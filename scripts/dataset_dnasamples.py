@@ -44,8 +44,8 @@ def process_fastq_file(inpath, write_path, config):
             outpath = os.path.join(write_path, label, os.path.basename(subpath) + ".db")
             os.makedirs(os.path.dirname(outpath), exist_ok=True)
             with Lmdb.open(outpath, 'c') as store:
-                store.update(fastq.to_encoded_dict(sample))
-        print(f"{len(sample)} sequences saved.")
+                store.update(fastq.to_encoded_dict(split))
+        print(f"{len(split)} sequences saved.")
 
 
 def create_dataset(config):
