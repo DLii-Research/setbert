@@ -8,32 +8,38 @@ from common.data import find_dbs, DnaLabelType, DnaSequenceGenerator
 from common.models import dnabert
 from common.utils import str_to_bool
 
-
-def define_arguments(parser):
+def define_arguments(cli):
+    # General config
+    cli.use_strategy()
+    
+    # Dataset artifact
+    cli.artifact("--dataset", type=str, required=True)
+    
     # Architecture Settings
-    parser.add_argument("--length", type=int, default=150)
-    parser.add_argument("--kmer", type=int, default=3)
-    parser.add_argument("--embed-dim", type=int, default=128)
-    parser.add_argument("--stack", type=int, default=8)
-    parser.add_argument("--num-heads", type=int, default=4)
-    parser.add_argument("--pre-layernorm", type=str_to_bool, default=True)
+    cli.argument("--length", type=int, default=150)
+    cli.argument("--kmer", type=int, default=3)
+    cli.argument("--embed-dim", type=int, default=128)
+    cli.argument("--stack", type=int, default=8)
+    cli.argument("--num-heads", type=int, default=4)
+    cli.argument("--pre-layernorm", type=str_to_bool, default=True)
 
     # Training settings
-    parser.add_argument("--batches-per-epoch", type=int, default=100)
-    parser.add_argument("--val-batches-per-epoch", type=int, default=16)
-    parser.add_argument("--data-augment", type=str_to_bool, default=True)
-    parser.add_argument("--data-balance", type=str_to_bool, default=False)
-    parser.add_argument("--data-workers", type=int, default=1)
-    parser.add_argument("--epochs", type=int, default=500)
-    parser.add_argument("--batch-size", type=int, default=512)
-    parser.add_argument("--sub-batch-size", type=int, default=0)
-    parser.add_argument("--mask-ratio", type=float, default=0.15)
-    parser.add_argument("--optimizer", type=str, choices=["adam", "nadam"], default="adam")
-    parser.add_argument("--lr", type=float, default=4e-4)
-    parser.add_argument("--init-lr", type=float, default=0.0)
-    parser.add_argument("--warmup-steps", type=int, default=10000)
+    cli.use_training(epochs=2000, batch_size=2000)
+    cli.argument("--batches-per-epoch", type=int, default=100)
+    cli.argument("--val-batches-per-epoch", type=int, default=16)
+    cli.argument("--data-augment", type=str_to_bool, default=True)
+    cli.argument("--data-balance", type=str_to_bool, default=False)
+    cli.argument("--mask-ratio", type=float, default=0.15)
+    cli.argument("--optimizer", type=str, choices=["adam", "nadam"], default="adam")
+    cli.argument("--lr", type=float, default=4e-4)
+    cli.argument("--init-lr", type=float, default=0.0)
+    cli.argument("--warmup-steps", type=int, default=10000)
+    
+    # Logging
+    cli.argument("--save-to", type=str, default=None)
+    cli.argument("--log-artifact", type=str, default=None)
 
-
+    
 def load_dataset(config, datadir):
     samples = find_dbs(datadir)
     for sample in samples:
@@ -49,10 +55,10 @@ def load_dataset(config, datadir):
         labels=DnaLabelType.KMer,
         rng=bootstrap.rng())
     return dataset
-
-
+    
+    
 def load_datasets(config):
-    datadir = bootstrap.use_dataset(config)
+    datadir = bootstrap.artifact(config, "dataset")
     datasets = []
     for folder in ("train", "validation"):
         datasets.append(load_dataset(config, os.path.join(datadir, folder)))
@@ -60,6 +66,7 @@ def load_datasets(config):
 
 
 def create_model(config):
+    print("Creating model...")
     base = dnabert.DnaBertModel(
         length=config.length,
         kmer=config.kmer,
@@ -83,12 +90,19 @@ def create_model(config):
     return model
 
 
-def load_model(path):
-    return dnabert.DnaBertPretrainModel.load(path)
+def load_model(model_path, weights_path):
+    print("Loading model...")
+    model = dnabert.DnaBertPretrainModel.load(path)
+    print("Setting weights...")
+    model.load_weights(weights_path)
+    return model
 
 
 def create_callbacks(config):
-    callbacks = bootstrap.callbacks({})
+    print("Creating callbacks...")
+    callbacks = []
+    if bootstrap.is_using_wandb():
+        callbacks.append(bootstrap.wandb_callback(save_weights_only=True))
     if config.warmup_steps is not None:
         callbacks.append(LearningRateStepScheduler(
             init_lr = config.init_lr,
@@ -99,8 +113,8 @@ def create_callbacks(config):
     return callbacks
 
 
-def train(config, model_path=None):
-    with bootstrap.strategy().scope():
+def train(config, model_path, weights_path):
+    with bootstrap.strategy(config).scope():
         # Load the dataset
         train_data, val_data = load_datasets(config)
 
@@ -119,47 +133,48 @@ def train(config, model_path=None):
             train_data,
             validation_data=val_data,
             subbatch_size=config.sub_batch_size,
-            initial_epoch=bootstrap.initial_epoch(),
+            initial_epoch=bootstrap.initial_epoch(config),
             epochs=config.epochs,
             callbacks=callbacks,
             use_multiprocessing=(config.data_workers > 1),
             workers=config.data_workers)
 
         # Save the model
-        bootstrap.save_model(model)
+        if config.save_to:
+            bootstrap.save_model(model, bootstrap.path_to(config.save_to))
 
     return model
 
-
+    
 def main(argv):
-    # Job Information
-    job_info = {
-        "name": "dnabert-pretrain",
-        "job_type": bootstrap.JobType.Pretrain,
-        "project": os.environ["WANDB_PROJECT_DNABERT_PRETRAIN"],
-        "group": "dnabert/pretrain"
-    }
-
-    # Initialize the job and load the config
-    job_config, config = bootstrap.init(argv, job_info, define_arguments)
-
+    config = bootstrap.init(argv[1:], define_arguments)
+    
     # If this is a resumed run, we need to fetch the latest model run
     model_path = None
+    weights_path = None
     if bootstrap.is_resumed():
         print("Restoring previous model...")
         model_path = bootstrap.restore_dir(config.save_to)
-
+        weights_path = bootstrap.restore(config.save_to + ".h5")
+        
+    print(config)
+    
     # Train the model if necessary
-    if bootstrap.initial_epoch() < config.epochs:
-        train(config, model_path)
+    import wandb
+    if bootstrap.initial_epoch(config) < config.epochs:
+        train(config, model_path, weights_path)
     else:
         print("Skipping training")
 
     # Upload an artifact of the model if requested
-    if job_config.log_artifacts:
+    if config.log_artifact:
         print("Logging artifact...")
-        bootstrap.log_model_artifact(bootstrap.group().replace('/', '-'))
-
+        assert bool(config.save_to)
+        bootstrap.log_artifact(config.log_artifact, [
+            bootstrap.path_to(config.save_to),
+            bootstrap.path_to(config.save_to) + ".h5"
+        ])
+    
 
 if __name__ == "__main__":
-    sys.exit(bootstrap.boot(main, (sys.argv,)) or 0)
+    sys.exit(bootstrap.boot(main, sys.argv))

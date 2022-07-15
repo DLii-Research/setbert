@@ -1,218 +1,238 @@
 import argparse
-import datetime
 import dotenv
+import datetime
 import os
 import numpy as np
 import tensorflow as tf
 import tf_utils as tfu
 import sys
-import wandb
-from wandb.keras import WandbCallback
 
 # Allow importing from the current working directory
 sys.path.append("./")
 
 from common import utils
 
-# Constants ----------------------------------------------------------------------------------------
+# A session object for variable reference
+__session = {}
 
-# The default model path
-DEFAULT_MODEL_FILE = "model"
+# Configuration Parsing ---------------------------------------------------------------------------
 
-# Module Data --------------------------------------------------------------------------------------
+class CliArgumentFactory:
+    def __init__(self, description=None):
+        self.parser = argparse.ArgumentParser(description=description)
+        self.job_args = []
+        self.use_wandb()
+        
+    def argument(self, *args, **kwargs):
+        return self.parser.add_argument(*args, **kwargs)
+        
+    def job_argument(self, *args, **kwargs):
+        arg = self.argument(*args, **kwargs)
+        self.job_args.append(arg.dest)
+        return arg
+    
+    def artifact(self, arg_name, *args, required=True, **kwargs):
+        group = self.parser.add_mutually_exclusive_group(required=required)
+        group.add_argument(arg_name + "-path", *args, **kwargs)
+        group.add_argument(arg_name + "-artifact", *args, **kwargs)
+    
+    def use_strategy(self):
+        self.argument("--gpus", default=None, type=lambda x: list(map(int, x.split(','))), help="Comma separated list of integers. Example: 0,1")
+        
+    def use_training(self, epochs=1, batch_size=None, sub_batch_size=0, data_workers=1):
+        self.job_argument("--initial-epoch", type=int, default=0)
+        self.job_argument("--epochs", type=int, default=epochs)
+        self.argument("--batch-size", type=int, required=(batch_size is None), default=batch_size)
+        self.argument("--sub-batch-size", type=int, default=sub_batch_size)
+        self.argument("--data-workers", type=int, default=data_workers)
+        
+    def use_wandb(self, allow_resume=True):
+        self.job_argument("--wandb-project", type=str, default=None, help="W&B project name")
+        self.job_argument("--wandb-name", type=str, default=None, help="W&B run name")
+        self.job_argument("--wandb-group", type=str, default=None, help="W&B group name")
+        self.job_argument("--wandb-mode", type=str, choices=["online", "offline", "disabled"], default="online")
+        if allow_resume:
+            self.job_argument("--resume", type=str, default=None, help="W&B Job ID of existing run")
+        
+    def parse(self, argv):
+        config = self.parser.parse_args(argv)
+        job_config = self.__extract_job_config(config)
+        
+        # If a run ID was specified explicitly, we should only
+        # keep the CLI arguments that were supplied explicitly
+        # as all other values should default to the previous run.
+        if hasattr(job_config, "wandb_job_id") and job_config.wandb_job_id is not None:
+            supplied_args = self.__supplied_cli_args(argv, config)
+            self.__remove_defaults_from_config(config, supplied_args)
+        return job_config, config
+        
+    def __extract_job_config(self, config):
+        """
+        Extract the given fields from the configuration as a separate Namespace instance
+        """
+        extracted = {}
+        config_dict = vars(config)
+        for key in self.job_args:
+            extracted[key] = config_dict[key]
+            delattr(config, key)
+        result = argparse.Namespace()
+        result.__dict__.update(extracted)
+        return result
+    
+    def __supplied_cli_args(self, argv, config):
+        """
+        Get the list of explicitly-supplied arguments from the CLI
+        """
+        aux_parser = argparse.ArgumentParser(argument_default=argparse.SUPPRESS)
+        for arg in vars(config):
+            aux_parser.add_argument("--" + arg.replace('_', '-'))
+        cli_args, _ = aux_parser.parse_known_args(argv[1:])
+        return cli_args
 
-# Track config arguments that are invisible to the W&B config
-__job_args = []
-
-# Maintain the job configuration instance
-__job_config = None
-
-# W&B API instance
-__wandb_api = None
-
-# The training strategy
-__strategy = None
-
-# The random seed
-__seed = None
-
-# Definitions --------------------------------------------------------------------------------------
-
-class JobType:
-    """
-    Standardize job types.
-    """
-    CreateDataset = "dataset-create"
-    Evaluate = "evaluate"
-    Finetune = "finetune"
-    Pretrain ="pretrain"
-    Train = "train"
-
-# Internal Functions -------------------------------------------------------------------------------
-
-def __define_common_arguments(parser):
-    """
-    Add job-specific configuration arguments. These arguments are not supplied to the W&B config.
-    """
-    add_job_argument(parser, "--run-id", type=str, default=None)
-    add_job_argument(parser, "--log-artifacts", default=False, action="store_true")
-    add_job_argument(parser, "--subgroup", type=str, default=None)
-    parser.add_argument("--seed", type=int, default=None)
-
-
-def __define_dataset_arguments(parser):
-    """
-    Define common arguments for dataset-related tasks.
-    """
-    parser.add_argument("--data-path", type=str, required=True)
-
-
-def __define_model_arguments(parser):
-    """
-    Define common arguments for model-related tasks.
-    """
-    parser.add_argument("--data-artifact", type=str, default=None)
-
-
-def __define_training_arguments(parser):
-    """
-    Define common arguments for training jobs.
-    """
-    parser.add_argument("--save-to", type=str, default=DEFAULT_MODEL_FILE)
-
-
-def __extract_job_config(config):
-    """
-    Extract the given fields from the configuration as a separate Namespace instance
-    """
-    extracted = {}
-    config_dict = vars(config)
-    for key in __job_args:
-        extracted[key] = config_dict[key]
-        delattr(config, key)
-    result = argparse.Namespace()
-    result.__dict__.update(extracted)
-    return result
-
-
-def __config_from_cli_args(argv, job_type, arg_defs):
-    """
-    Create the initial configuration from the CLI using tf_utils.
-    """
-    defs = [__define_common_arguments]
-    if arg_defs is not None:
-        defs.append(arg_defs)
-    if job_type in {JobType.CreateDataset}:
-        defs.append(__define_dataset_arguments)
-    if job_type in {JobType.Evaluate, JobType.Finetune, JobType.Pretrain, JobType.Train}:
-        defs.append(__define_model_arguments)
-    if job_type in {JobType.Finetune, JobType.Pretrain, JobType.Train}:
-        defs.append(__define_training_arguments)
-    config = tfu.config.create_config(argv[1:], defs)
-    return config
+    def __remove_defaults_from_config(self, config, supplied_args):
+        """
+        Remove default arguments from the given config
+        """
+        to_remove = set(vars(config).keys()) - set(vars(supplied_args).keys())
+        for key in to_remove:
+            delattr(config, key) 
 
 
-def __supplied_cli_args(argv, config):
-    """
-    Get the list of explicitly-supplied arguments from the CLI
-    """
-    aux_parser = argparse.ArgumentParser(argument_default=argparse.SUPPRESS)
-    for arg in vars(config):
-        aux_parser.add_argument("--" + arg.replace('_', '-'))
-    cli_args, _ = aux_parser.parse_known_args(argv[1:])
-    return cli_args
-
-
-def __remove_defaults_from_config(config, supplied_args):
-    """
-    Remove default arguments from the given config
-    """
-    to_remove = set(vars(config).keys()) - set(vars(supplied_args).keys())
-    for key in to_remove:
-        delattr(config, key)
-
-
-def __create_config(argv, job_type, arg_defs):
-    """
-    Create a configuration given the input CLI arguments
-    """
-    # Load arguments directly from CLI
-    config = __config_from_cli_args(argv, job_type, arg_defs)
-    job_config = __extract_job_config(config)
-
-    # If a run ID was specified explicitly, we should only
-    # keep the CLI arguments that were supplied explicitly
-    # as all other values should default to the previous run.
-    if job_config.run_id is not None:
-        supplied_args = __supplied_cli_args(argv, config)
-        __remove_defaults_from_config(config, supplied_args)
-
-    return job_config, config
-
-
-def __init_wandb(job_config, config, **kwargs):
+def __init_wandb(job_config, config):
     """
     Initialize the W&B instance
     """
+    __session["is_resumed"] = bool(job_config.resume)
+    if not hasattr(job_config, "wandb_project"):
+        return None
+    if utils.str_to_bool(os.environ["WANDB_DISABLED"]):
+        print("WARNING: Weights and Biases is currently disabled in the environment.")
+        return None
+    
+    import wandb
+    
     # Run-resume
-    if job_config.run_id is None:
-        job_config.run_id = wandb.util.generate_id()
-        kwargs["name"] = name_timestamped(kwargs["name"])
+    if hasattr(job_config, "wandb_job_id") and job_config.wandb_job_id is not None:
+        job_id = job_config.resume
     else:
-        kwargs["name"] = None
+        job_id = wandb.util.generate_id()
 
-    # Subgrouping
-    if job_config.subgroup is not None:
-        kwargs["group"] += '/' + job_config.subgroup
+    __session["run"] = wandb.init(
+        id=job_id,
+        name=job_config.wandb_name,
+        group=job_config.wandb_group,
+        mode=job_config.wandb_mode,
+        config=config,
+        resume=bool(job_config.resume))
 
-    return wandb.init(id=job_config.run_id, config=config, resume="allow", **kwargs)
 
-# Interface ----------------------------------------------------------------------------------------
-
-def add_job_argument(parser, *args, **kwargs):
-    """
-    Add a job-specific argument to the parser. These arguments are invisible to the W&B config.
-    """
-    arg = parser.add_argument(*args, **kwargs)
-    __job_args.append(arg.dest)
-    return arg
-
-def boot(callback, args):
-    """
-    Boot a job by loading all required dependencies before init.
-    """
+def boot(job, argv):
     dotenv.load_dotenv()
-    return callback(*args)
+    job(argv)
+    
 
-def init(argv, job_info, arg_defs=None, **kwargs):
+def configure(argv, arg_defs):
+    builder = CliArgumentFactory()
+    for arg_def in arg_defs:
+        arg_def(builder)
+    return builder.parse(argv)
+
+
+def init(argv, arg_defs):
+    # Parse the configuration
+    job_config, config = configure(argv, [arg_defs])
+    
+    # Create the W&B instance
+    __init_wandb(job_config, config)
+    
+    # Merge the configs
+    config.__dict__.update(job_config.__dict__)
+    return config
+    
+
+@utils.static_vars(instance=None)
+def strategy(config):
+    if strategy.instance is None:
+        if config.gpus is None:
+            print("Using CPU Strategy")
+            strategy.instance = tfu.strategy.cpu()
+        else:
+            print("Using GPU Strategy. Selected GPUs: {config.gpus}")
+            strategy.instance = tfu.strategy.gpu(*config.gpus)
+    return strategy.instance
+
+
+def artifact(config, key):
     """
-    Initialize a new job.
+    Fetch the path to an artifact from the config.
     """
-    global __job_config
+    path = getattr(config, f"{key}_path")
+    if path is not None:
+        return path
+    
+    import wandb
+    name = getattr(config, f"{key}_artifact")
+    if not is_wandb_disabled():
+        artifact = wandb_run().use_artifact(name)
+    else:
+        artifact = wandb_api().artifact(name)
+    
+    path = None
+    if os.environ["WANDB_ARTIFACTS_PATH"] is not None:
+        path = os.path.join(os.environ["WANDB_ARTIFACTS_PATH"], name)
+    return artifact.download(path)
 
-    # Create the configuration
-    __job_config, config = __create_config(argv, job_info["job_type"], arg_defs)
 
-    # initialize W&B
-    __init_wandb(__job_config, config, **job_info, **kwargs)
-
-    # Set the random generation seeds
-    if wandb.run.config.seed is not None:
-        set_seed(wandb.run.config.seed)
-
-    # Return the resulting configuration
-    return __job_config, wandb.run.config
-
-
-def set_seed(seed):
+def log_artifact(name, paths, type=None, description=None, metadata=None, incremental=None, use_as=None):
     """
-    Set the random seed
+    Log an artifact to W&B
     """
-    global __seed
-    __seed = seed
-    tf.keras.utils.set_random_seed(seed)
+    if not is_using_wandb():
+        return
+    import wandb
+    if isinstance(paths, str):
+        paths = [paths]
+    artifact = wandb.Artifact(name, type, description, metadata, incremental, use_as)
+    for path in paths:
+        if os.path.isdir(path):
+            artifact.add_dir(path)
+        else:
+            artifact.add_file(path)
+    wandb_run().log_artifact(artifact)
 
 
+def restore(name, run_path=None, replace=False, root=None):
+    """
+    Restore the specified file from a previous run
+    """
+    if not is_using_wandb():
+        return name
+    import wandb
+    return wandb.restore(name, run_path, replace, root)
+
+
+def restore_dir(name, run_path=None, replace=False, root=None):
+    """
+    Restore (recursively) a the given directory from a previous run
+    """
+    if not is_using_wandb():
+        return name
+    run_path = run_path if run_path is not None else wandb_run().path
+    run = wandb_api().run(run_path)
+    for f in filter(lambda f: f.name.startswith(name), run.files()):
+        return wandb.restore(name, run_path, replace, root)
+    return os.path.join(wandb_run().dir, name)
+
+
+def save_model(model, path):
+    """
+    Save a model. If using W&B, the model is saved in the current run directory.
+    """
+    print(f"Saving model to: {path}")
+    model.save(path)
+    model.save_weights(f"{path}.h5")
+    
+    
 def run_safely(fn, *args, **kwargs):
     """
     Run a function with keyboard interrupt protection.
@@ -223,203 +243,72 @@ def run_safely(fn, *args, **kwargs):
         return None
 
 
-def save_model(model, path=DEFAULT_MODEL_FILE):
-    """
-    Save a model. If using W&B, the model is saved in the current run directory.
-    """
-    path = os.path.join(wandb.run.dir, path)
-    print(f"Saving model to: {path}")
-    return model.save(path), path
-
-
-def log_file_artifact(name, paths, type=None, description=None, metadata=None, incremental=None, use_as=None):
-    """
-    Log an artifact to W&B
-    """
+def cwd():
     if not is_using_wandb():
-        return
-    if isinstance(paths, str):
-        paths = [paths]
-    artifact = wandb.Artifact(name, type, description, metadata, incremental, use_as)
-    for path in paths:
-        full_path = os.path.join(wandb.run.dir, path)
-        if os.path.isdir(full_path):
-            artifact.add_dir(full_path)
-        else:
-            artifact.add_file(full_path)
-    wandb.run.log_artifact(artifact)
+        return os.getcwd()
+    return wandb_run().dir
 
 
-def log_dataset_artifact(name, paths, type="dataset", description=None, metadata=None, incremental=None, use_as=None):
-    """
-    A convenience function to log a dataset artifact to W&B
-    """
-    return log_file_artifact(name, paths, type, description, metadata, incremental, use_as)
+def path_to(paths):
+    if type(paths) is str:
+        return os.path.join(cwd(), paths)
+    d = cwd()
+    return [os.path.join(d, p) for p in paths]
 
 
-def log_model_artifact(name, paths=DEFAULT_MODEL_FILE, type="model", description=None, metadata=None, incremental=None, use_as=None):
-    """
-    A convenience function to log a model artifact to W&B
-    """
-    return log_file_artifact(name, paths, type, description, metadata, incremental, use_as)
+@utils.static_vars(instance=None)
+def wandb_api():
+    if wandb_api.instance is None:
+        import wandb
+        wandb_api.instance = wandb.Api()
+    return wandb_api.instance
 
 
-def callbacks(wandb_callback_args={}):
-    """
-    Create the common callbacks list. If using W&B, WandCallback is included.
-    """
-    callbacks = []
-    args = {
-        "save_weights_only": True # Because W&B forces creating artifacts for SavedModel format
-    }
-    args.update(wandb_callback_args)
-    if is_using_wandb():
-        callbacks.append(WandbCallback(**args))
-    return callbacks
-
-
-def use_artifact(artifact_name, type=None, aliases=None, use_as=None):
-    """
-    Use a W&B artifact. Returns the path.
-    """
-    if not is_using_wandb():
-        return None
-    return wandb_instance().use_artifact(artifact_name, type, aliases, use_as)
-
-
-def use_model(artifact_name, type="model", aliases=None, use_as="model"):
-    """
-    Use a model artifact from W&B.
-    """
-    return use_artifact(artifact_name, type, aliases, use_as).download()
-
-
-def use_dataset(config, type="dataset", aliases=None, use_as="dataset"):
-    """
-    Get the path to the dataset. Donwload an artifact if required.
-    """
-    return use_artifact(config.data_artifact, type, aliases, use_as).download()
-
-
-def restore(name, run_path=None, replace=False, root=None):
-    """
-    Restore the specified file from a previous run
-    """
-    return wandb.restore(name, run_path, replace, root)
-
-
-def restore_dir(name, run_path=None, replace=False, root=None):
-    """
-    Restore (recursively) a the given directory from a previous run
-    """
-    run_path = run_path if run_path is not None else wandb.run.path
-    run = wandb_api().run(run_path)
-    for f in filter(lambda f: f.name.startswith(name), run.files()):
-        restore(f.name, run_path, replace, root)
-    return os.path.join(wandb.run.dir, name)
-
-
-def run(path):
-    """
-    Get the specified W&B run using the public API
-    """
-    return wandb_api().run(path)
-
-# Utility Functions --------------------------------------------------------------------------------
-
-def name_timestamped(name, sep='-'):
-    """
-    Append a timestamp onto the given name separated by the given separator.
-    """
-    return f"{name}{sep}{int(datetime.datetime.now().timestamp())}"
-
-
-def is_using_wandb():
-    """
-    Determine if we are using W&B.
-    """
-    return not wandb.run.disabled
-
-# Accessors ----------------------------------------------------------------------------------------
-
-def config():
-    """
-    Fetch the current configuration instance.
-    """
-    return wandb.config
-
-
-def job_config():
-    """
-    Fetch the current job configuration instance.
-    """
-    return __job_config
-
-
-def group():
-    """
-    Fetch the current group name
-    """
-    return wandb.run.group
-
-
-def strategy():
-    """
-    Fetch the current strategy instance.
-    If the strategy doesn't exist, it will be created.
-    """
-    global __strategy
-    if __strategy is None:
-        __strategy = tfu.strategy.gpu(list(map(int, os.environ["GPUS"].split(','))))
-    return __strategy
-
-
-def rng(seed=None):
+def random_seed(seed):
     if seed is None:
-        seed = __seed
+        return
+    __session["seed"] = seed
+    __session["next_seed"] = seed
+    keras.utils.set_random_seed(seed)
+    
+    
+def rng():
+    seed = None
+    if "seed" in __session:
+        __session["next_seed"] += 1
+        seed = __session["next_seed"]
     return np.random.default_rng(seed)
 
 
-def initial_epoch():
-    """
-    Get the last step executed in the current run
-    """
-    return wandb.run.step
-
-
 def is_resumed():
-    """
-    Determine if the current run is a resumed run
-    """
-    return wandb.run.resumed
+    return __session["is_resumed"]
 
 
-def data_path(*args):
-    """
-    Prefix the given path with the current run directory
-    """
-    return os.path.join(wandb.run.dir, *args)
+def is_using_wandb():
+    return "run" in __session
 
 
-def run_id():
-    """
-    Fetch the current run ID
-    """
-    return wandb.run.id
+def is_wandb_disabled():
+    if not is_using_wandb():
+        return True
+    return wandb_run().disabled
 
 
-def wandb_api():
-    """
-    Fetch the current W&B public API instance.
-    """
-    global __wandb_api
-    if __wandb_api is None:
-        __wandb_api = wandb.Api()
-    return __wandb_api
+def wandb_run():
+    return __session["run"]
+    
+    
+def initial_epoch(config):
+    if not is_using_wandb():
+        return config.initial_epoch
+    run = __session
+    if config.initial_epoch > 0 and wandb_run().step != config.initial_epoch:
+        print("WARNING: Supplied initial epoch will be ignored while using W&B.")
+    return wandb_run().step
 
 
-def wandb_instance():
-    """
-    Fetch the current W&B instance if it exists.
-    """
-    return wandb.run
+def wandb_callback(*args, **kwargs):
+    if not is_using_wandb():
+        return None
+    import wandb
+    return wandb.keras.WandbCallback(*args, **kwargs)
