@@ -1,9 +1,7 @@
 import tensorflow.keras as keras
-import wandb
 
 class LearningRateStepScheduler(keras.callbacks.Callback):
     def __init__(self, init_lr, max_lr, warmup_steps, end_steps):
-        import wandb
         super().__init__()
         self.step = 0
         self.init_lr = init_lr
@@ -20,7 +18,11 @@ class LearningRateStepScheduler(keras.callbacks.Callback):
         self.model.optimizer.learning_rate.assign(lr)
 
     def on_epoch_end(self, epoch, logs=None):
-        if wandb.run.disabled:
+        try:
+            import wandb
+        except ImportError:
+            return
+        if not wandb.run or wandb.run.disabled:
             return
         wandb.run.log({
             "epoch": epoch,
