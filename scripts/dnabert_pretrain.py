@@ -1,4 +1,6 @@
 import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = '2'
+
 import tensorflow.keras as keras
 import sys
 
@@ -160,7 +162,6 @@ def main(argv):
     print(config)
     
     # Train the model if necessary
-    import wandb
     if bootstrap.initial_epoch(config) < config.epochs:
         train(config, model_path, weights_path)
     else:
