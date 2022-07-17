@@ -1,4 +1,6 @@
 import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = '2'
+
 import tensorflow as tf
 import tensorflow.keras as keras
 import sys
@@ -15,53 +17,56 @@ import numpy as np
 from scipy.spatial import KDTree
 import wandb
 
-
-def define_arguments(parser):
-    # Artifact settings
-    parser.add_argument("--dnabert-artifact", type=str, default=None)
+def define_arguments(cli):
+    cli.use_strategy()
+    
+    # Artifacts
+    cli.artifact("--dataset", type=str, required=True)
+    cli.artifact("--dnabert", type=str, required=True)
 
     # Shared Architecture Settings
-    parser.add_argument("--embed-dim", type=int, default=256)
-    parser.add_argument("--use-layernorm", type=str_to_bool, default=True)
-    parser.add_argument("--use-pre-layernorm", type=str_to_bool, default=True)
-    parser.add_argument("--use-spectral-norm", type=str_to_bool, default=True)
-    parser.add_argument("--num-anchors", type=int, default=48)
-    parser.add_argument("--activation-fn", type=str, default="relu")
+    cli.argument("--embed-dim", type=int, default=256)
+    cli.argument("--use-layernorm", type=str_to_bool, default=True)
+    cli.argument("--use-pre-layernorm", type=str_to_bool, default=True)
+    cli.argument("--use-spectral-norm", type=str_to_bool, default=True)
+    cli.argument("--num-anchors", type=int, default=48)
+    cli.argument("--activation-fn", type=str, default="relu")
 
     # Generator Settings
-    parser.add_argument("--noise-dim", type=int, default=64)
-    parser.add_argument("--condition-dim", type=int, default=128)
-    parser.add_argument("--g-stack", type=int, default=4)
-    parser.add_argument("--g-num-heads", type=int, default=4)
+    cli.argument("--noise-dim", type=int, default=64)
+    cli.argument("--condition-dim", type=int, default=128)
+    cli.argument("--g-stack", type=int, default=4)
+    cli.argument("--g-num-heads", type=int, default=4)
 
     # Discriminator Settings
-    parser.add_argument("--d-stack", type=int, default=3)
-    parser.add_argument("--d-num-heads", type=int, default=4)
+    cli.argument("--d-stack", type=int, default=3)
+    cli.argument("--d-num-heads", type=int, default=4)
     
     # Reconstructor Settings
-    parser.add_argument("--r-stack", type=int, default=4)
-    parser.add_argument("--r-num-heads", type=int, default=4)
+    cli.argument("--r-stack", type=int, default=4)
+    cli.argument("--r-num-heads", type=int, default=4)
 
     # Training settings
-    parser.add_argument("--batches-per-epoch", type=int, default=100)
-    parser.add_argument("--data-augment", type=str_to_bool, default=True)
-    parser.add_argument("--data-balance", type=str_to_bool, default=False)
-    parser.add_argument("--data-workers", type=int, default=1)
-    parser.add_argument("--epochs", type=int, default=1000)
-    parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--sub-batch-size", type=int, default=0)
-    parser.add_argument("--optimizer", type=str, choices=["adam", "nadam"], default="adam")
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--encoder-batch-size", type=int, default=512)
-    parser.add_argument("--subsample-length", type=int, default=1000)
-    parser.add_argument("--num_control_subsamples", type=int, default=10)
-    parser.add_argument("--num_test_subsamples", type=int, default=5)
-
-
+    cli.use_training(epochs=1000, batch_size=16)
+    cli.argument("--batches-per-epoch", type=int, default=100)
+    cli.argument("--data-augment", type=str_to_bool, default=True)
+    cli.argument("--data-balance", type=str_to_bool, default=False)
+    cli.argument("--optimizer", type=str, choices=["adam", "nadam"], default="adam")
+    cli.argument("--lr", type=float, default=1e-4)
+    cli.argument("--encoder-batch-size", type=int, default=512)
+    cli.argument("--subsample-length", type=int, default=1000)
+    cli.argument("--num_control_subsamples", type=int, default=10)
+    cli.argument("--num_test_subsamples", type=int, default=5)
+    
+    cli.argument("--save-to", type=str, default=None)
+    cli.argument("--log-artifact", type=str, default=None)
+    
+    
 def fetch_dna_samples(config):
-    datadir = bootstrap.use_dataset(config)
+    datadir = bootstrap.artifact(config, "dataset")
     path = os.path.join(datadir, "train")
-    samples = find_dbs(path)
+    samples = find_dbs(path)[:5]
+    print(samples)
     return samples
 
 
@@ -82,7 +87,7 @@ def load_dataset(config, samples, encoder):
 
 def create_model(config, num_samples):
     # Fetch the encoder
-    path = bootstrap.use_model(config.dnabert_artifact)
+    path = bootstrap.artifact(config, "dnabert")
     encoder = dnabert.DnaBertEncoderModel(
         dnabert.DnaBertPretrainModel.load(path).base,
         use_kmer_encoder=True)
@@ -144,7 +149,8 @@ def create_model(config, num_samples):
         Optimizer = keras.optimizers.Nadam
 
     model.compile(
-        loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction="sum"),
+        generator_loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction="sum"),
+        discriminator_loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction="sum"),
         generator_optimizer=Optimizer(config.lr),
         reconstructor_optimizer=Optimizer(config.lr),
         discriminator_optimizer=Optimizer(config.lr),
@@ -184,7 +190,7 @@ class DnaGastMdsCallback(keras.callbacks.Callback):
 
     def generate_random_subsamples(self, batch_size):
         subsamples = random_subsamples(
-            samples=self.samples,
+            sample_paths=self.samples,
             sequence_length=self.encoder.base.length,
             subsample_size=self.subsample_size,
             subsamples_per_sample=self.control_subsamples_per_sample,
@@ -239,7 +245,7 @@ class DnaGastMdsCallback(keras.callbacks.Callback):
         ax.legend(
             ["Real", "Synthetic"] + [os.path.splitext(os.path.basename(s))[0] for s in self.samples],
             loc="center left",
-            bbox_to_anchor=(1.0, 0.0),
+            bbox_to_anchor=(1.0, 0.5),
             fancybox=False)
         ax.set_title(f"MDS of Chamfer Distances Between DNA Samples (epoch {epoch})")
         fig.tight_layout()
@@ -266,7 +272,9 @@ class DnaGastMdsCallback(keras.callbacks.Callback):
 
 
 def create_callbacks(config, test_samples):
-    callbacks = bootstrap.callbacks()
+    callbacks = []
+    if bootstrap.is_using_wandb():
+        callbacks.append(bootstrap.wandb_callback(save_weights_only=True))
     callbacks.append(DnaGastMdsCallback(
         samples=test_samples,
         subsample_size=config.subsample_length,
@@ -281,9 +289,9 @@ def create_callbacks(config, test_samples):
     return callbacks
 
 
-def train(config, model_path=None):
-    with bootstrap.strategy().scope():
-
+def train(config, model_path=None, weights_path=None):
+    with bootstrap.strategy(config).scope():
+        
         # Fetch the DNA sample files
         samples = fetch_dna_samples(config)
 
@@ -303,7 +311,7 @@ def train(config, model_path=None):
         bootstrap.run_safely(
             model.fit,
             data,
-            initial_epoch=bootstrap.initial_epoch(),
+            initial_epoch=bootstrap.initial_epoch(config),
             subbatch_size=config.sub_batch_size,
             epochs=config.epochs,
             callbacks=callbacks,
@@ -311,40 +319,37 @@ def train(config, model_path=None):
             workers=config.data_workers)
 
         # # Save the model
-        bootstrap.save_model(model)
-
+        bootstrap.save_model(model, bootstrap.path_to(config.save_to))
     return model
-
+        
 
 def main(argv):
-    # Job Information
-    job_info = {
-        "name": "dnagast-train",
-        "job_type": bootstrap.JobType.Train,
-        "project": os.environ["WANDB_PROJECT_DNAGAST"],
-        "group": "veegan"
-    }
-
-    # Initialize the job and load the config
-    job_config, config = bootstrap.init(argv, job_info, define_arguments)
-
+    config = bootstrap.init(argv[1:], define_arguments)
+    
     # If this is a resumed run, we need to fetch the latest model run
     model_path = None
+    weights_path = None
     if bootstrap.is_resumed():
         print("Restoring previous model...")
         model_path = bootstrap.restore_dir(config.save_to)
-
-    # Train the model if necessary
-    if bootstrap.initial_epoch() < config.epochs:
-        train(config, model_path)
+        weights_path = bootstrap.restore(config.save_to + ".h5")
+    
+    if bootstrap.initial_epoch(config) < config.epochs:
+        train(config, model_path, weights_path)
     else:
         print("Skipping training")
-
+        
     # Upload an artifact of the model if requested
-    if job_config.log_artifacts:
+    if config.log_artifact:
         print("Logging artifact...")
-        bootstrap.log_model_artifact(bootstrap.group().replace('/', '-'))
-
-
+        assert bool(config.save_to)
+        bootstrap.log_artifact(config.log_artifact, [
+            bootstrap.path_to(config.save_to),
+            bootstrap.path_to(config.save_to) + ".h5"
+        ])
+        
+    
+    print(config)
+    
 if __name__ == "__main__":
-    sys.exit(bootstrap.boot(main, (sys.argv,)) or 0)
+    sys.exit(bootstrap.boot(main, sys.argv))
