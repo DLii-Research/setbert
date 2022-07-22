@@ -13,10 +13,10 @@ from common.utils import str_to_bool
 def define_arguments(cli):
     # General config
     cli.use_strategy()
-    
+
     # Dataset artifact
     cli.artifact("--dataset", type=str, required=True)
-    
+
     # Architecture Settings
     cli.argument("--length", type=int, default=150)
     cli.argument("--kmer", type=int, default=3)
@@ -27,6 +27,7 @@ def define_arguments(cli):
 
     # Training settings
     cli.use_training(epochs=2000, batch_size=2000)
+    cli.argument("--seed", type=int, default=None)
     cli.argument("--batches-per-epoch", type=int, default=100)
     cli.argument("--val-batches-per-epoch", type=int, default=16)
     cli.argument("--data-augment", type=str_to_bool, default=True)
@@ -36,18 +37,20 @@ def define_arguments(cli):
     cli.argument("--lr", type=float, default=4e-4)
     cli.argument("--init-lr", type=float, default=0.0)
     cli.argument("--warmup-steps", type=int, default=10000)
-    
+
     # Logging
     cli.argument("--save-to", type=str, default=None)
     cli.argument("--log-artifact", type=str, default=None)
 
-    
-def load_dataset(config, datadir):
+
+def load_datasets(config):
+    datadir = bootstrap.artifact(config, "dataset")
     samples = find_dbs(datadir)
-    for sample in samples:
-        print(sample)
-    dataset = DnaSequenceGenerator(
+    print("Dataset artifact located at:", datadir)
+    print(f"Found samples ({len(samples)}):")
+    _, (train, val) = DnaSequenceGenerator.split(
         samples=samples,
+        split_ratios=[0.8, 0.2],
         sequence_length=config.length,
         kmer=config.kmer,
         batch_size=config.batch_size,
@@ -55,16 +58,9 @@ def load_dataset(config, datadir):
         augment=config.data_augment,
         balance=config.data_balance,
         labels=DnaLabelType.KMer,
-        rng=bootstrap.rng())
-    return dataset
-    
-    
-def load_datasets(config):
-    datadir = bootstrap.artifact(config, "dataset")
-    datasets = []
-    for folder in ("train", "validation"):
-        datasets.append(load_dataset(config, os.path.join(datadir, folder)))
-    return datasets
+        rng=bootstrap.rng()
+    )
+    return (train, val)
 
 
 def create_model(config):
@@ -85,9 +81,13 @@ def create_model(config):
     elif config.optimizer == "nadam":
         optimizer = keras.optimizers.Nadam(config.lr)
 
-    model.compile(optimizer=optimizer, metrics=[
-        keras.metrics.SparseCategoricalAccuracy()
-    ])
+    model.compile(
+        optimizer=optimizer,
+        metrics=[
+            keras.metrics.SparseCategoricalAccuracy(),
+        ],
+        run_eagerly=config.run_eagerly
+    )
 
     return model
 
@@ -147,10 +147,13 @@ def train(config, model_path, weights_path):
 
     return model
 
-    
+
 def main(argv):
     config = bootstrap.init(argv[1:], define_arguments)
-    
+
+    # Set the random seed
+    bootstrap.random_seed(config.seed)
+
     # If this is a resumed run, we need to fetch the latest model run
     model_path = None
     weights_path = None
@@ -158,9 +161,9 @@ def main(argv):
         print("Restoring previous model...")
         model_path = bootstrap.restore_dir(config.save_to)
         weights_path = bootstrap.restore(config.save_to + ".h5")
-        
+
     print(config)
-    
+
     # Train the model if necessary
     if bootstrap.initial_epoch(config) < config.epochs:
         train(config, model_path, weights_path)
@@ -169,13 +172,13 @@ def main(argv):
 
     # Upload an artifact of the model if requested
     if config.log_artifact:
-        print("Logging artifact...")
+        print("Logging artifact to", config.save_to)
         assert bool(config.save_to)
         bootstrap.log_artifact(config.log_artifact, [
             bootstrap.path_to(config.save_to),
             bootstrap.path_to(config.save_to) + ".h5"
-        ])
-    
+        ], type="model")
+
 
 if __name__ == "__main__":
     sys.exit(bootstrap.boot(main, sys.argv))

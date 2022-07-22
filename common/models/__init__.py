@@ -34,6 +34,7 @@ class CustomModel(keras.Model):
                 loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
             grads = tape.gradient(loss, self.trainable_weights)
             self.compiled_metrics.update_state(y, y_pred)
+            
             return [], [grads]
         _, (grads,) = accumulate_train_step(step, batch, self.subbatch_size, self)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))

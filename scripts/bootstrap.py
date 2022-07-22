@@ -1,9 +1,11 @@
 import argparse
+import pickle
 import dotenv
 import datetime
 import os
 import numpy as np
 import tensorflow as tf
+import tensorflow.keras as keras
 import tf_utils as tfu
 import sys
 
@@ -22,30 +24,32 @@ class CliArgumentFactory:
         self.parser = argparse.ArgumentParser(description=description)
         self.job_args = []
         self.use_wandb()
-        
+
     def argument(self, *args, **kwargs):
         return self.parser.add_argument(*args, **kwargs)
-        
+
     def job_argument(self, *args, **kwargs):
         arg = self.argument(*args, **kwargs)
         self.job_args.append(arg.dest)
         return arg
-    
+
     def artifact(self, arg_name, *args, required=True, **kwargs):
         group = self.parser.add_mutually_exclusive_group(required=required)
         group.add_argument(arg_name + "-path", *args, **kwargs)
         group.add_argument(arg_name + "-artifact", *args, **kwargs)
-    
+
     def use_strategy(self):
         self.argument("--gpus", default=None, type=lambda x: list(map(int, x.split(','))), help="Comma separated list of integers. Example: 0,1")
-        
+
     def use_training(self, epochs=1, batch_size=None, sub_batch_size=0, data_workers=1):
         self.job_argument("--initial-epoch", type=int, default=0)
         self.job_argument("--epochs", type=int, default=epochs)
         self.argument("--batch-size", type=int, required=(batch_size is None), default=batch_size)
         self.argument("--sub-batch-size", type=int, default=sub_batch_size)
         self.argument("--data-workers", type=int, default=data_workers)
-        
+        self.argument("--run-eagerly", action="store_true", default=False)
+        self.argument("--use-dynamic-memory", action="store_true", default=False)
+
     def use_wandb(self, allow_resume=True):
         self.job_argument("--wandb-project", type=str, default=None, help="W&B project name")
         self.job_argument("--wandb-name", type=str, default=None, help="W&B run name")
@@ -53,11 +57,11 @@ class CliArgumentFactory:
         self.job_argument("--wandb-mode", type=str, choices=["online", "offline", "disabled"], default="online")
         if allow_resume:
             self.job_argument("--resume", type=str, default=None, help="W&B Job ID of existing run")
-        
+
     def parse(self, argv):
         config = self.parser.parse_args(argv)
         job_config = self.__extract_job_config(config)
-        
+
         # If a run ID was specified explicitly, we should only
         # keep the CLI arguments that were supplied explicitly
         # as all other values should default to the previous run.
@@ -65,7 +69,7 @@ class CliArgumentFactory:
             supplied_args = self.__supplied_cli_args(argv, config)
             self.__remove_defaults_from_config(config, supplied_args)
         return job_config, config
-        
+
     def __extract_job_config(self, config):
         """
         Extract the given fields from the configuration as a separate Namespace instance
@@ -78,7 +82,7 @@ class CliArgumentFactory:
         result = argparse.Namespace()
         result.__dict__.update(extracted)
         return result
-    
+
     def __supplied_cli_args(self, argv, config):
         """
         Get the list of explicitly-supplied arguments from the CLI
@@ -95,7 +99,7 @@ class CliArgumentFactory:
         """
         to_remove = set(vars(config).keys()) - set(vars(supplied_args).keys())
         for key in to_remove:
-            delattr(config, key) 
+            delattr(config, key)
 
 
 def __init_wandb(job_config, config):
@@ -108,9 +112,9 @@ def __init_wandb(job_config, config):
     if utils.str_to_bool(os.environ["WANDB_DISABLED"]):
         print("WARNING: Weights and Biases is currently disabled in the environment.")
         return None
-    
+
     import wandb
-    
+
     # Run-resume
     if hasattr(job_config, "wandb_job_id") and job_config.wandb_job_id is not None:
         job_id = job_config.resume
@@ -119,6 +123,7 @@ def __init_wandb(job_config, config):
 
     __session["run"] = wandb.init(
         id=job_id,
+        project=job_config.wandb_project,
         name=job_config.wandb_name,
         group=job_config.wandb_group,
         mode=job_config.wandb_mode,
@@ -128,8 +133,8 @@ def __init_wandb(job_config, config):
 
 def boot(job, argv):
     dotenv.load_dotenv()
-    job(argv)
-    
+    return job(argv) or 0
+
 
 def configure(argv, arg_defs):
     builder = CliArgumentFactory()
@@ -141,14 +146,14 @@ def configure(argv, arg_defs):
 def init(argv, arg_defs):
     # Parse the configuration
     job_config, config = configure(argv, [arg_defs])
-    
+
     # Create the W&B instance
     __init_wandb(job_config, config)
-    
+
     # Merge the configs
     config.__dict__.update(job_config.__dict__)
     return config
-    
+
 
 @utils.static_vars(instance=None)
 def strategy(config):
@@ -157,8 +162,8 @@ def strategy(config):
             print("Using CPU Strategy")
             strategy.instance = tfu.strategy.cpu()
         else:
-            print("Using GPU Strategy. Selected GPUs: {config.gpus}")
-            strategy.instance = tfu.strategy.gpu(*config.gpus)
+            print(f"Using GPU Strategy. Selected GPUs: {config.gpus}")
+            strategy.instance = tfu.strategy.gpu(config.gpus, use_dynamic_memory=config.use_dynamic_memory)
     return strategy.instance
 
 
@@ -169,21 +174,21 @@ def artifact(config, key):
     path = getattr(config, f"{key}_path")
     if path is not None:
         return path
-    
+
     import wandb
     name = getattr(config, f"{key}_artifact")
     if not is_wandb_disabled():
         artifact = wandb_run().use_artifact(name)
     else:
         artifact = wandb_api().artifact(name)
-    
+
     path = None
     if os.environ["WANDB_ARTIFACTS_PATH"] is not None:
         path = os.path.join(os.environ["WANDB_ARTIFACTS_PATH"], name)
     return artifact.download(path)
 
 
-def log_artifact(name, paths, type=None, description=None, metadata=None, incremental=None, use_as=None):
+def log_artifact(name, paths, type, description=None, metadata=None, incremental=None, use_as=None):
     """
     Log an artifact to W&B
     """
@@ -195,10 +200,13 @@ def log_artifact(name, paths, type=None, description=None, metadata=None, increm
     artifact = wandb.Artifact(name, type, description, metadata, incremental, use_as)
     for path in paths:
         if os.path.isdir(path):
+            print("Adding directory:", path)
             artifact.add_dir(path)
         else:
+            print("Adding file:", path)
             artifact.add_file(path)
-    wandb_run().log_artifact(artifact)
+    print("Logging artifact:", artifact)
+    wandb.log_artifact(artifact)
 
 
 def restore(name, run_path=None, replace=False, root=None):
@@ -230,9 +238,15 @@ def save_model(model, path):
     """
     print(f"Saving model to: {path}")
     model.save(path)
-    model.save_weights(f"{path}.h5")
-    
-    
+    try:
+        model.save_weights(f"{path}.h5")
+    except Exception as e:
+        print("Failed to write weights to a file. Saving weights in a pickle file. Reason:")
+        print(e)
+        with open(f"{path}.data", "wb") as f:
+            pickle.dump(model.get_weights(), f)
+
+
 def run_safely(fn, *args, **kwargs):
     """
     Run a function with keyboard interrupt protection.
@@ -270,8 +284,8 @@ def random_seed(seed):
     __session["seed"] = seed
     __session["next_seed"] = seed
     keras.utils.set_random_seed(seed)
-    
-    
+
+
 def rng():
     seed = None
     if "seed" in __session:
@@ -296,8 +310,8 @@ def is_wandb_disabled():
 
 def wandb_run():
     return __session["run"]
-    
-    
+
+
 def initial_epoch(config):
     if not is_using_wandb():
         return config.initial_epoch
