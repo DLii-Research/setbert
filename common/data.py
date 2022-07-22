@@ -4,6 +4,7 @@ import numpy as np
 import os
 import tensorflow as tf
 import tensorflow.keras as keras
+import time
 
 
 def find_dbs(path):
@@ -247,7 +248,8 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         sample_indices = self.sample_indices[batch_index]
         sequence_indices = self.sequence_indices[batch_index]
         for i in range(self.batch_size):
-            sequence_index = np.floor(len(self.indices[i])*sequence_indices[i]).astype(int)
+            sample_index = sample_indices[i]
+            sequence_index = np.floor(len(self.indices[sample_index])*sequence_indices[i]).astype(int)
             sequence = self.samples[sample_indices[i]][str(sequence_index).encode()]
             offset = self.augment_offset_fn(len(sequence), augment_index=(batch_index, i))
             batch[i] = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
