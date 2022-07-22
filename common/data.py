@@ -14,12 +14,12 @@ def find_dbs(path):
     return sorted(files)
 
 
-def random_subsamples(samples, sequence_length, subsample_size, subsamples_per_sample=1, augment=True, balance=False, rng=None):
+def random_subsamples(sample_paths, sequence_length, subsample_size, subsamples_per_sample=1, augment=True, balance=False, rng=None):
     """
     Generate random subsamples of the given samples.
     """
     samples = []
-    for sample in samples:
+    for sample in sample_paths:
         store = Lmdb.open(sample)
         if len(store) < subsample_size:
             print(f"Warning: Sample '{sample}' only contains {len(store)} sequences. This sample will not be included.")
@@ -54,10 +54,91 @@ class DnaLabelType(enum.Enum):
     KMer = enum.auto()
 
 
+# class DataGenerator(keras.utils.Sequence):
+#     def __init__(self, batch_size, batches_per_epoch):
+#         super()
+#         self.batch_size = batch_size
+#         self.batches_per_epoch = tf.constant(batches_per_epoch)
+#         self.__output_signature = None
+
+#     def output_signature(self):
+#         if self.__output_signature is None:
+#             self.__output_signature = tuple(tf.TensorSpec(x.shape, x.dtype) for x in self[0])
+#         return self.__output_signature
+
+#     def to_dataset(self, strategy=None):
+#         dataset = tf.data.Dataset.from_generator(self, output_signature=self.output_signature())
+#         dataset.batch(self.batch_size)
+#         options = tf.data.Options()
+#         options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
+#         dataset.with_options(options)
+#         print("Cardinality:", dataset.cardinality)
+#         dataset.cardinality = lambda: self.batches_per_epoch
+#         print("New Cardinality:", dataset.cardinality)
+#         if strategy:
+#             dataset = strategy.experimental_distribute_dataset(dataset)
+#         return dataset
+
+#     def __call__(self):
+#         for i in range(len(self)):
+#             yield self[i]
+#         self.on_epoch_end()
+
+
+def open_lmdb(path, lock=False):
+    try:
+        return Lmdb.open(path, lock=lock)
+    except:
+        return Lmdb.open(path)
+
+
 class DnaSequenceGenerator(keras.utils.Sequence):
     """
     A DNA sequence generator for Keras models
     """
+
+    @classmethod
+    def split(cls, samples, split_ratios=[0.8, 0.2], balance=False, rng=None, **kwargs):
+        assert np.sum(split_ratios) <= 1.0, "Provided split ratios must sum to 1.0"
+        rng = rng if rng is not None else np.random.default_rng()
+        stores = [open_lmdb(s) for s in samples]
+        lengths = np.array([len(s) for s in stores])
+        indices = [rng.permutation(l) for l in lengths]
+
+        # Compute the split points via cumulative sum
+        splits = np.cumsum(np.concatenate(([0], split_ratios)))
+        splits[-1] = 1.0 # ensure last point = 1.0
+
+        if balance:
+            min_len = np.min(lengths)
+            lengths = np.array([min_len]*len(lengths))
+            indices = [i[:min_len] for i in indices]
+
+        # Create partitioned indices
+        split_indices = [[] for _ in range(len(split_ratios))]
+        to_remove = set()
+        for sample_index, index_list in enumerate(indices):
+            split_points = (splits*len(index_list)).astype(int)
+            for i, index in enumerate(range(len(split_points) - 1)):
+                start = split_points[index]
+                end = split_points[index + 1]
+                partition = index_list[start:end]
+                split_indices[i].append(partition)
+                if len(partition) == 0:
+                    to_remove.add(sample_index)
+
+        # Remove empty generators
+        for i in reversed(sorted(list(to_remove))):
+            print(f"Sample '{samples[i]}' does not contain enough sequences. This sample will be ignored.")
+            del samples[i]
+            del stores[i]
+            np.delete(split_indices, i)
+
+        generators = []
+        for i in range(len(split_indices)):
+            gen = cls(stores, balance=balance, indices=split_indices[i], rng=rng, **kwargs)
+            generators.append(gen)
+        return samples, tuple(generators)
 
     def __init__(
         self,
@@ -69,22 +150,37 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         augment=True,
         balance=False,
         labels=None,
-        rng=None
+        indices=None,
+        rng=None,
+        _delay_init=False
     ):
         super().__init__()
-        self.samples = self.open_samples(samples)
-        self.sample_lengths = np.array([len(s) for s in self.samples])
-        self.num_samples = len(self.samples)
+        self.samples = samples
         self.sequence_length = sequence_length
         self.kmer = kmer
-        self.augment = augment
         self.batch_size = batch_size
         self.batches_per_epoch = batches_per_epoch
+        self.augment = augment
         self.balance = balance
         self.labels = labels
+        self.indices = indices
         self.rng = rng if rng is not None else np.random.default_rng()
 
-        if balance:
+        if not _delay_init:
+            self.initialize()
+
+    def initialize(self):
+        self.num_samples = len(self.samples)
+
+        # Available sequence indices for each sample
+        if self.indices is None:
+            self.indices = [np.arange(len(s)) for s in self.samples]
+
+        # The length of each sample
+        self.sample_lengths = np.max(len(i) for i in self.indices)
+
+        # Should we trim the data to balance each sample?
+        if self.balance:
             self.sample_lengths[:] = np.min(self.sample_lengths)
 
         # Sequence augmentation/clipping
@@ -93,6 +189,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         else:
             self.augment_offset_fn = lambda *_: 0
 
+        # k-mer encodings
         if self.kmer > 1:
             self.kmer_kernel = 5**np.arange(self.kmer)
             self.to_kmers = lambda x: np.convolve(x, self.kmer_kernel, mode="valid")
@@ -112,9 +209,6 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 
         # Shuffle the indices
         self.shuffle()
-        
-    def open_samples(self, sample_paths):
-        return [Lmdb.open(s, lock=False) for s in sample_paths]
 
     def shuffle(self):
         # Full epoch indices shape
@@ -122,10 +216,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 
         # Select random samples
         self.sample_indices = self.rng.integers(self.num_samples, size=shape, dtype=np.int32)
-
-        # Select random sequence indices
-        lengths = self.sample_lengths[self.sample_indices]
-        self.sequence_indices = (lengths * self.rng.uniform(size=shape)).astype(int)
+        self.sequence_indices = self.rng.uniform(size=shape) # 0.0 - 1.0
 
         # Augmented offsets
         if self.augment:
@@ -156,7 +247,8 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         sample_indices = self.sample_indices[batch_index]
         sequence_indices = self.sequence_indices[batch_index]
         for i in range(self.batch_size):
-            sequence = self.samples[sample_indices[i]][str(sequence_indices[i]).encode()]
+            sequence_index = np.floor(len(self.indices[i])*sequence_indices[i]).astype(int)
+            sequence = self.samples[sample_indices[i]][str(sequence_index).encode()]
             offset = self.augment_offset_fn(len(sequence), augment_index=(batch_index, i))
             batch[i] = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
         return batch
@@ -170,6 +262,27 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 
 
 class DnaSampleGenerator(DnaSequenceGenerator):
+
+    @classmethod
+    def split(cls, samples, split_ratios=[0.8, 0.2], balance=False, rng=None, **kwargs):
+        samples, generators = super().split(samples, split_ratios, balance, rng, _delay_init=True, **kwargs)
+        # Find generators with too few sequences
+        to_remove = set()
+        for generator in generators:
+            for i, indices in enumerate(generator.indices):
+                if len(indices) < generator.subsample_length:
+                    print(f"Sample '{samples[i]}' does not contain enough sequences. This sample will be ignored.")
+                    to_remove.add(i)
+        # Remove common samples
+        for i in reversed(sorted(list(to_remove))):
+            del generators[0].samples[i] # all generators share the same sample array
+            for generator in generators:
+                del generator.indices[i]
+
+        for generator in generators:
+            generator.initialize()
+        return samples, generators
+
     def __init__(
         self,
         samples,
@@ -181,7 +294,9 @@ class DnaSampleGenerator(DnaSequenceGenerator):
         augment=True,
         balance=False,
         labels=None,
-        rng=None
+        indices=None,
+        rng=None,
+        _delay_init=True
     ):
         self.subsample_length = subsample_length
         self.sequence_indices = np.empty(
@@ -197,18 +312,10 @@ class DnaSampleGenerator(DnaSequenceGenerator):
             augment=augment,
             balance=balance,
             labels=labels,
-            rng=rng)
-        
-    def open_samples(self, sample_paths):
-        samples = []
-        for sample in sample_paths:
-            store = Lmdb.open(sample, lock=False)
-            if len(store) < self.subsample_length:
-                print(f"Warning: Sample '{sample}' only contains {len(store)} sequences. This sample will not be included.")
-                store.close()
-                continue
-            samples.append(store)
-        return samples
+            indices=indices,
+            rng=rng,
+            _delay_init=_delay_init)
+
 
     def shuffle(self):
         self.sample_indices = self.rng.integers(
@@ -216,13 +323,13 @@ class DnaSampleGenerator(DnaSequenceGenerator):
             size=(self.batches_per_epoch, self.batch_size),
             dtype=np.int32)
 
-        lengths = self.sample_lengths[self.sample_indices]
         for i in range(self.batches_per_epoch):
             for j in range(self.batch_size):
+                sample_id = self.sample_indices[i,j]
                 self.sequence_indices[i,j] = self.rng.choice(
-                    np.arange(lengths[i,j]),
+                    self.indices[sample_id],
                     self.subsample_length,
-                    replace=False,)
+                    replace=False)
 
         # Augmented offsets
         if self.augment:
