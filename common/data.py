@@ -99,7 +99,20 @@ class DnaSequenceGenerator(keras.utils.Sequence):
     """
 
     @classmethod
-    def split(cls, samples, split_ratios=[0.8, 0.2], balance=False, rng=None, **kwargs):
+    def split(
+        cls,
+        samples,
+        sequence_length,
+        split_ratios=[0.8, 0.2],
+        kmer=1,
+        batch_size=32,
+        batches_per_epoch=128,
+        augment=True,
+        balance=False,
+        labels=None,
+        rng=None,
+        **kwargs
+    ):
         assert np.sum(split_ratios) <= 1.0, "Provided split ratios must sum to 1.0"
         rng = rng if rng is not None else np.random.default_rng()
         stores = [open_lmdb(s) for s in samples]
@@ -137,7 +150,18 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 
         generators = []
         for i in range(len(split_indices)):
-            gen = cls(stores, balance=balance, indices=split_indices[i], rng=rng, **kwargs)
+            gen = cls(
+                samples=stores,
+                sequence_length=sequence_length,
+                kmer=(kmer if type(kmer) is int else kmer[i]),
+                batch_size=(batch_size if type(batch_size) is int else batch_size[i]),
+                batches_per_epoch=(batches_per_epoch if type(batches_per_epoch) is int else batches_per_epoch[i]),
+                augment=augment,
+                balance=balance,
+                labels=labels,
+                indices=split_indices[i],
+                rng=rng,
+                **kwargs)
             generators.append(gen)
         return samples, tuple(generators)
 
@@ -266,8 +290,35 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 class DnaSampleGenerator(DnaSequenceGenerator):
 
     @classmethod
-    def split(cls, samples, split_ratios=[0.8, 0.2], balance=False, rng=None, **kwargs):
-        samples, generators = super().split(samples, split_ratios, balance, rng, _delay_init=True, **kwargs)
+    def split(
+        cls,
+        samples,
+        sequence_length,
+        subsample_length,
+        split_ratios=[0.8, 0.2],
+        kmer=1,
+        batch_size=32,
+        batches_per_epoch=128,
+        augment=True,
+        balance=False,
+        labels=None,
+        rng=None,
+        **kwargs
+    ):
+        samples, generators = super().split(
+            samples=samples,
+            sequence_length=sequence_length,
+            subsample_length=subsample_length,
+            split_ratios=split_ratios,
+            kmer=kmer,
+            batch_size=batch_size,
+            batches_per_epoch=batches_per_epoch,
+            augment=augment,
+            balance=balance,
+            labels=labels,
+            rng=rng,
+            _delay_init=True,
+            **kwargs)
         # Find generators with too few sequences
         to_remove = set()
         for generator in generators:
