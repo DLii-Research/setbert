@@ -176,8 +176,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         balance=False,
         labels=None,
         indices=None,
-        rng=None,
-        _delay_init=False
+        rng=None
     ):
         super().__init__()
         self.samples = samples
@@ -190,12 +189,16 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         self.labels = labels
         self.indices = indices
         self.rng = rng if rng is not None else np.random.default_rng()
-
-        if not _delay_init:
-            self.initialize()
+        self.is_initialized = False
 
     def initialize(self):
+        assert self.is_initialized is False
+        self.is_initialized = True
         self.num_samples = len(self.samples)
+
+        for i, sample in enumerate(self.samples):
+            if type(sample) is str:
+                self.samples[i] = open_lmdb(sample)
 
         # Available sequence indices for each sample
         if self.indices is None:
@@ -268,6 +271,8 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         return self.post_process_batch(batch, batch_index)
 
     def generate_batch(self, batch_index):
+        if not self.is_initialized:
+            self.initialize()
         batch = np.empty((self.batch_size, self.sequence_length), dtype=np.int32)
         sample_indices = self.sample_indices[batch_index]
         sequence_indices = self.sequence_indices[batch_index]
@@ -317,7 +322,6 @@ class DnaSampleGenerator(DnaSequenceGenerator):
             balance=balance,
             labels=labels,
             rng=rng,
-            _delay_init=True,
             **kwargs)
         # Find generators with too few sequences
         to_remove = set()
@@ -331,9 +335,6 @@ class DnaSampleGenerator(DnaSequenceGenerator):
             del generators[0].samples[i] # all generators share the same sample array
             for generator in generators:
                 del generator.indices[i]
-
-        for generator in generators:
-            generator.initialize()
         return samples, generators
 
     def __init__(
@@ -349,7 +350,7 @@ class DnaSampleGenerator(DnaSequenceGenerator):
         labels=None,
         indices=None,
         rng=None,
-        _delay_init=True
+        **kwargs
     ):
         self.subsample_length = subsample_length
         self.sequence_indices = np.empty(
@@ -367,7 +368,7 @@ class DnaSampleGenerator(DnaSequenceGenerator):
             labels=labels,
             indices=indices,
             rng=rng,
-            _delay_init=_delay_init)
+            **kwargs)
 
 
     def shuffle(self):
@@ -396,6 +397,8 @@ class DnaSampleGenerator(DnaSequenceGenerator):
         return result
 
     def generate_batch(self, batch_index):
+        if not self.is_initialized:
+            self.initialize()
         batch = np.empty(
             (self.batch_size, self.subsample_length, self.sequence_length),
             dtype=np.int32)
