@@ -27,7 +27,7 @@ def define_arguments(cli):
 
     # Shared Architecture Settings
     cli.argument("--embed-dim", type=int, default=256)
-    cli.argument("--use-keras-mha", type=str_to_bool, default=False)
+    cli.argument("--use-keras-mha", type=str_to_bool, default=True)
     cli.argument("--use-layernorm", type=str_to_bool, default=True)
     cli.argument("--use-pre-layernorm", type=str_to_bool, default=True)
     cli.argument("--use-spectral-norm", type=str_to_bool, default=False)
@@ -128,7 +128,7 @@ def create_model(config, num_samples):
         ]
     )
 
-    discriminator = gast.VeeGastDiscriminator(
+    discriminator = gast.VeeGastCritic(
         noise_dim=config.noise_dim,
         latent_dim=encoder.base.embed_dim,
         embed_dim=config.embed_dim,
@@ -168,11 +168,13 @@ def create_model(config, num_samples):
         name="Reconstructor")
     reconstructor.compile(optimizer=Optimizer(config.lr))
 
-    model = dnagast.DnaSampleConditionalVeeGan(
+    model = dnagast.DnaSampleConditionalVeeWGan(
         generator=generator,
         discriminator=discriminator,
         reconstructor=reconstructor,
-        encoder=encoder)
+        encoder=encoder,
+        gp_lambda=10.0,
+        use_split_labels=False)
 
     model.compile(run_eagerly=config.run_eagerly)
 

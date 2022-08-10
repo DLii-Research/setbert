@@ -1,4 +1,5 @@
 import os
+import pickle
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = '2'
 
 import tensorflow as tf
@@ -10,7 +11,6 @@ from common.data import find_dbs, random_subsamples, DnaLabelType, DnaSampleGene
 from common.models import dnabert, dnagast, gast
 from common.utils import plt_to_image, str_to_bool
 
-# For the DNA GAST callback
 from common.metrics import chamfer_distance_matrix, chamfer_distance_extend_matrix, mds
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,7 +27,7 @@ def define_arguments(cli):
 
     # Shared Architecture Settings
     cli.argument("--embed-dim", type=int, default=256)
-    cli.argument("--use-keras-mha", type=str_to_bool, default=False)
+    cli.argument("--use-keras-mha", type=str_to_bool, default=True)
     cli.argument("--use-layernorm", type=str_to_bool, default=True)
     cli.argument("--use-pre-layernorm", type=str_to_bool, default=True)
     cli.argument("--use-spectral-norm", type=str_to_bool, default=False)
@@ -44,10 +44,6 @@ def define_arguments(cli):
     cli.argument("--d-stack", type=int, default=3)
     cli.argument("--d-num-heads", type=int, default=4)
 
-    # Reconstructor Settings
-    cli.argument("--r-stack", type=int, default=4)
-    cli.argument("--r-num-heads", type=int, default=4)
-
     # Training settings
     cli.use_training(epochs=1000, batch_size=16)
     cli.argument("--seed", type=int, default=None)
@@ -56,7 +52,6 @@ def define_arguments(cli):
     cli.argument("--data-balance", type=str_to_bool, default=False)
     cli.argument("--optimizer", type=str, choices=["adam", "nadam"], default="adam")
     cli.argument("--lr", type=float, default=1e-4)
-    cli.argument("--encoder-batch-size", type=int, default=512)
     cli.argument("--subsample-length", type=int, default=1000)
     cli.argument("--num_control_subsamples", type=int, default=10)
     cli.argument("--num_test_subsamples", type=int, default=5)
@@ -74,7 +69,7 @@ def fetch_dna_samples(config):
 
 
 def load_dataset(config, samples, encoder):
-    samples, (dataset,) = DnaSampleGenerator.split(
+    _, (dataset,) = DnaSampleGenerator.split(
         samples=samples,
         sequence_length=encoder.base.length,
         subsample_length=config.subsample_length,
@@ -86,7 +81,7 @@ def load_dataset(config, samples, encoder):
         balance=config.data_balance,
         labels=DnaLabelType.SampleIds,
         rng=bootstrap.rng())
-    return samples, dataset
+    return dataset
 
 
 def create_model(config, num_samples):
@@ -101,7 +96,7 @@ def create_model(config, num_samples):
     elif config.optimizer == "nadam":
         Optimizer = keras.optimizers.Nadam
 
-    generator = gast.VeeGastGenerator(
+    generator = gast.GastGenerator(
         max_set_size=config.subsample_length,
         noise_dim=config.noise_dim,
         embed_dim=config.embed_dim,
@@ -128,8 +123,7 @@ def create_model(config, num_samples):
         ]
     )
 
-    discriminator = gast.VeeGastDiscriminator(
-        noise_dim=config.noise_dim,
+    discriminator = gast.WGastCritic(
         latent_dim=encoder.base.embed_dim,
         embed_dim=config.embed_dim,
         stack=config.d_stack,
@@ -153,38 +147,24 @@ def create_model(config, num_samples):
         ]
     )
 
-    reconstructor = gast.VeeGastReconstructor(
-        noise_dim=config.noise_dim,
-        latent_dim=encoder.base.embed_dim,
-        embed_dim=config.embed_dim,
-        stack=config.r_stack,
-        num_heads=config.r_num_heads,
-        num_anchors=config.num_anchors,
-        use_keras_mha=config.use_keras_mha,
-        use_spectral_norm=config.use_spectral_norm,
-        activation=config.activation_fn,
-        pre_layernorm=config.use_pre_layernorm,
-        num_classes=num_samples,
-        name="Reconstructor")
-    reconstructor.compile(optimizer=Optimizer(config.lr))
-
-    model = dnagast.DnaSampleConditionalVeeGan(
+    model = dnagast.DnaSampleConditionalWGan(
         generator=generator,
         discriminator=discriminator,
-        reconstructor=reconstructor,
-        encoder=encoder)
+        encoder=encoder,
+        gp_lambda=10.0,
+        use_split_labels=False,
+        name="DNA_WGAST")
 
     model.compile(run_eagerly=config.run_eagerly)
 
     generator.summary()
     discriminator.summary()
-    reconstructor.summary()
 
     return model
 
 
-def load_model(path):
-    model = dnagast.DnaSampleConditionalVeeWGan.load(path)
+def load_model(model_path, weights_path):
+    model = dnagast.DnaSampleConditionalVeeGan.load(model_path)
     if weights_path.endswith(".h5"):
         model.load_weights(weights_path)
     else:
@@ -408,12 +388,12 @@ def train(config, model_path=None, weights_path=None):
 
         # Create the autoencoder model
         if model_path is not None:
-            model = load_model(model_path)
+            model = load_model(model_path, weights_path)
         else:
             model = create_model(config, num_samples=len(samples))
 
         # Load the dataset
-        samples, data = load_dataset(config, samples, model.encoder)
+        data = load_dataset(config, samples, model.encoder)
 
         # Create any collbacks we may need
         callbacks = create_callbacks(config, samples)

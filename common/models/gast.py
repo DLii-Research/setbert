@@ -257,8 +257,121 @@ class GastDiscriminator(CustomModel, IConditionalGanComponent):
     @property
     def gan_num_classes(self):
         return self.num_classes
-    
-    
+
+
+@CustomObject
+class WGastCritic(CustomModel, IConditionalGanComponent):
+    def __init__(
+        self,
+        latent_dim,
+        embed_dim,
+        stack,
+        num_heads,
+        num_anchors,
+        use_keras_mha=False,
+        use_spectral_norm=True,
+        activation="relu",
+        ff_dim=None,
+        use_layernorm=False,
+        pre_layernorm=True,
+        num_classes=1,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.latent_dim = latent_dim
+        self.embed_dim = embed_dim
+        self.stack = stack
+        self.num_heads = num_heads
+        self.num_anchors = num_anchors
+        self.use_keras_mha = use_keras_mha
+        self.use_spectral_norm = use_spectral_norm
+        self.activation = activation
+        self.ff_dim = ff_dim
+        self.use_layernorm = use_layernorm
+        self.pre_layernorm = pre_layernorm
+        self.num_classes = num_classes
+
+        self.model = self.build_model()
+
+    def build_model(self):
+        y = x = keras.layers.Input((None, self.latent_dim))
+
+        y = st.spectral_dense(self.embed_dim, use_spectral_norm=self.use_spectral_norm)(y)
+
+        # Encode the original set
+        enc = [st.InducedSetEncoder(
+            num_seeds=1,
+            embed_dim=self.embed_dim,
+            num_heads=self.num_heads,
+            ff_dim=self.ff_dim,
+            ff_activation=self.activation,
+            use_layernorm=self.use_layernorm,
+            pre_layernorm=self.pre_layernorm,
+            is_final_block=True,
+            use_keras_mha=self.use_keras_mha,
+            use_spectral_norm=self.use_spectral_norm)(y)]
+
+        # Pass the set through ISABs, encoding along the way
+        for i in range(self.stack):
+            y1 = st.InducedSetAttentionBlock(
+                embed_dim=self.embed_dim,
+                num_heads=self.num_heads,
+                num_induce=self.num_anchors,
+                ff_dim=self.ff_dim,
+                ff_activation=self.activation,
+                use_keras_mha=self.use_keras_mha,
+                use_spectral_norm=self.use_spectral_norm,
+                use_layernorm=self.use_layernorm,
+                pre_layernorm=self.pre_layernorm,
+                is_final_block=(i == self.stack - 1))(y)
+            y = keras.layers.Add()((y, y1))
+            enc.append(st.InducedSetEncoder(
+                num_seeds=1,
+                embed_dim=self.embed_dim,
+                num_heads=self.num_heads,
+                ff_dim=self.ff_dim,
+                ff_activation=self.activation,
+                use_layernorm=self.use_layernorm,
+                pre_layernorm=self.pre_layernorm,
+                is_final_block=True,
+                use_keras_mha=self.use_keras_mha,
+                use_spectral_norm=self.use_spectral_norm)(y))
+
+        # Merge the encoded tensors
+        y = keras.layers.Concatenate()(enc)
+
+        cost = keras.layers.Dense(1)(y)
+        if self.gan_num_classes > 1:
+            labels = keras.layers.Dense(self.num_classes + 1)(y)
+            return keras.Model(x, (cost, labels))
+        return keras.Model(x, cost)
+
+    def call(self, inputs, training=None):
+        return self.model(inputs, training=training)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "latent_dim": self.latent_dim,
+            "embed_dim": self.embed_dim,
+            "stack": self.stack,
+            "num_heads": self.num_heads,
+            "num_anchors": self.num_anchors,
+            "use_keras_mha": self.use_keras_mha,
+            "use_spectral_norm": self.use_spectral_norm,
+            "activation": self.activation,
+            "ff_dim": self.ff_dim,
+            "use_layernorm": self.use_layernorm,
+            "pre_layernorm": self.pre_layernorm,
+            "num_classes": self.num_classes
+        })
+        return config
+
+    @property
+    def gan_num_classes(self):
+        return self.num_classes
+
+
 @CustomObject
 class VeeGastGenerator(CustomModel, IGanGenerator, IConditionalGanComponent):
     """
@@ -480,7 +593,7 @@ class VeeGastDiscriminator(CustomModel, IConditionalGanComponent):
         # Merge the encoded tensors
         y = keras.layers.Concatenate()(enc)
         y = keras.layers.Dense(self.embed_dim, activation=self.activation)(y)
-        
+
         # Merge noise into encoder
         y = keras.layers.Concatenate()((noise, y))
         y = keras.layers.Dense(self.embed_dim, activation=self.activation)(y)
@@ -518,7 +631,129 @@ class VeeGastDiscriminator(CustomModel, IConditionalGanComponent):
     def gan_num_classes(self):
         return self.num_classes
 
-    
+
+@CustomObject
+class VeeGastCritic(CustomModel, IConditionalGanComponent):
+    def __init__(
+        self,
+        noise_dim,
+        latent_dim,
+        embed_dim,
+        stack,
+        num_heads,
+        num_anchors,
+        use_keras_mha=False,
+        use_spectral_norm=True,
+        activation="relu",
+        ff_dim=None,
+        use_layernorm=False,
+        pre_layernorm=True,
+        num_classes=1,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.noise_dim = noise_dim
+        self.latent_dim = latent_dim
+        self.embed_dim = embed_dim
+        self.stack = stack
+        self.num_heads = num_heads
+        self.num_anchors = num_anchors
+        self.use_keras_mha = use_keras_mha
+        self.use_spectral_norm = use_spectral_norm
+        self.activation = activation
+        self.ff_dim = ff_dim
+        self.use_layernorm = use_layernorm
+        self.pre_layernorm = pre_layernorm
+        self.num_classes = num_classes
+
+        self.model = self.build_model()
+
+    def build_model(self):
+        noise = keras.layers.Input((self.noise_dim,))
+        data = keras.layers.Input((None, self.latent_dim))
+
+        y = st.spectral_dense(self.embed_dim, use_spectral_norm=self.use_spectral_norm)(data)
+
+        # Encode the original set
+        enc = [st.InducedSetEncoder(
+            num_seeds=1,
+            embed_dim=self.embed_dim,
+            num_heads=self.num_heads,
+            ff_dim=self.ff_dim,
+            ff_activation=self.activation,
+            use_layernorm=self.use_layernorm,
+            pre_layernorm=self.pre_layernorm,
+            is_final_block=True,
+            use_keras_mha=self.use_keras_mha,
+            use_spectral_norm=self.use_spectral_norm)(y)]
+
+        # Pass the set through ISABs, encoding along the way
+        for i in range(self.stack):
+            y1 = st.InducedSetAttentionBlock(
+                embed_dim=self.embed_dim,
+                num_heads=self.num_heads,
+                num_induce=self.num_anchors,
+                ff_dim=self.ff_dim,
+                ff_activation=self.activation,
+                use_keras_mha=self.use_keras_mha,
+                use_spectral_norm=self.use_spectral_norm,
+                use_layernorm=self.use_layernorm,
+                pre_layernorm=self.pre_layernorm,
+                is_final_block=(i == self.stack - 1))(y)
+            y = keras.layers.Add()((y, y1))
+            enc.append(st.InducedSetEncoder(
+                num_seeds=1,
+                embed_dim=self.embed_dim,
+                num_heads=self.num_heads,
+                ff_dim=self.ff_dim,
+                ff_activation=self.activation,
+                use_layernorm=self.use_layernorm,
+                pre_layernorm=self.pre_layernorm,
+                is_final_block=True,
+                use_keras_mha=self.use_keras_mha,
+                use_spectral_norm=self.use_spectral_norm)(y))
+
+        # Merge the encoded tensors
+        y = keras.layers.Concatenate()(enc)
+        y = keras.layers.Dense(self.embed_dim, activation=self.activation)(y)
+
+        # Merge noise into encoder
+        y = keras.layers.Concatenate()((noise, y))
+        y = keras.layers.Dense(self.embed_dim, activation=self.activation)(y)
+
+        # If only one class, use real/fake scheme
+        out = keras.layers.Dense(1)(y)
+        if self.num_classes > 1:
+            out = (out, keras.layers.Dense(self.num_classes + 1)(y))
+        return keras.Model((noise, data), out)
+
+    def call(self, inputs, training=None):
+        return self.model(inputs, training=training)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "noise_dim": self.noise_dim,
+            "latent_dim": self.latent_dim,
+            "embed_dim": self.embed_dim,
+            "stack": self.stack,
+            "num_heads": self.num_heads,
+            "num_anchors": self.num_anchors,
+            "use_keras_mha": self.use_keras_mha,
+            "use_spectral_norm": self.use_spectral_norm,
+            "activation": self.activation,
+            "ff_dim": self.ff_dim,
+            "use_layernorm": self.use_layernorm,
+            "pre_layernorm": self.pre_layernorm,
+            "num_classes": self.num_classes
+        })
+        return config
+
+    @property
+    def gan_num_classes(self):
+        return self.num_classes
+
+
 @CustomObject
 class VeeGastReconstructor(CustomModel, IConditionalGanComponent):
     def __init__(
@@ -607,10 +842,10 @@ class VeeGastReconstructor(CustomModel, IConditionalGanComponent):
         # Merge the encoded tensors
         y = keras.layers.Concatenate()(enc)
         y = keras.layers.Dense(self.embed_dim, activation=self.activation)(y)
-        
+
         if self.num_classes > 1:
             y = keras.layers.Add()((y, label_embedding))
-            
+
         y = st.spectral_dense(self.noise_dim, use_spectral_norm=self.use_spectral_norm, name="Last_projection")(y)
         y = tfp.layers.DistributionLambda(
             lambda x: tfp.distributions.Normal(loc=x, scale=1),
