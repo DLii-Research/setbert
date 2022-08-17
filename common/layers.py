@@ -339,6 +339,11 @@ class TransformerBlock(BaseTransformerBlock):
             return VaswaniMultiHeadAttention(num_heads=num_heads, embed_dim=embed_dim)
         return keras.layers.MultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
 
+    def build(self, input_shape):
+        if not self.use_vaswani_mha:
+            self.att._build_from_signature(input_shape, input_shape)
+        return super().build(input_shape)
+
     def get_config(self):
         config = super().get_config()
         config.update({
@@ -351,6 +356,10 @@ class TransformerBlock(BaseTransformerBlock):
 class RelativeTransformerBlock(BaseTransformerBlock):
     def create_attention_layer(self, embed_dim, num_heads):
         return RelativeMultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
+
+    def build(self, input_shape):
+        self.att._build_from_signature(input_shape, input_shape)
+        return super().build(input_shape)
 
 # Transformer Utility Layers -----------------------------------------------------------------------
 
