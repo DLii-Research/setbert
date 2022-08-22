@@ -1,27 +1,17 @@
 import gzip
 from lmdbm import Lmdb
-import numpy as np
 import os
 import re
 import sys
+import tf_utilities.scripting as tfs
 
 import bootstrap
-
 from common import fastq
 
-def define_arguments(parser):
-    parser.add_argument("--val-split", type=float, default=0.1)
-    parser.add_argument("--test-split", type=float, default=0.1)
-    parser.add_argument("--shuffle", type=bool, default=True)
-
-
-def split_sample(sample, val_split, test_split):
-    n = len(sample)
-    n_val = int(n*(val_split))
-    n_test = int(n*(test_split))
-    n_train = n - n_val - n_test
-    ends = np.cumsum((0, n_train, n_val, n_test))
-    return (sample[ends[i]:ends[i+1]] for i in range(3))
+def define_arguments(cli):
+    cli.argument("--data-path", type=str, required=True)
+    cli.argument("--save-to", type=str, required=True)
+    cli.argument("--log-artifact", type=str, default=None)
 
 
 def process_fastq_file(inpath, write_path, config):
@@ -34,18 +24,10 @@ def process_fastq_file(inpath, write_path, config):
     with open_file(inpath) as f:
         print(inpath, end=": ")
         sample = fastq.read(f)
-        if config.shuffle:
-            sample = [sample[i] for i in bootstrap.rng().permutation(len(sample))]
-        splits = split_sample(sample, config.val_split, config.test_split)
-        split_labels = ("train", "validation", "test")
-        for label, split in zip(split_labels, splits):
-            if len(split) == 0:
-                continue
-            outpath = os.path.join(write_path, label, os.path.basename(subpath) + ".db")
-            os.makedirs(os.path.dirname(outpath), exist_ok=True)
-            with Lmdb.open(outpath, 'c') as store:
-                store.update(fastq.to_encoded_dict(split))
-        print(f"{len(split)} sequences saved.")
+        outpath = os.path.join(write_path, os.path.basename(subpath) + ".db")
+        with Lmdb.open(outpath, 'c') as store:
+            store.update(fastq.to_encoded_dict(sample))
+        print(f"{len(sample)} sequences saved.")
 
 
 def create_dataset(config):
@@ -54,7 +36,10 @@ def create_dataset(config):
     """
     if not os.path.isdir(config.data_path):
         raise Exception(f"Invalid input directory: {config.data_path}")
-    write_path = bootstrap.data_path("dataset")
+
+    write_path = tfs.path_to(config.save_to)
+    os.makedirs(write_path, exist_ok=True)
+    print("Saving to", write_path)
 
     for cwd, _, files in os.walk(config.data_path):
         for file in files:
@@ -63,31 +48,19 @@ def create_dataset(config):
                 continue
             process_fastq_file(path, write_path, config)
 
+    return write_path
 
-def main(argv):
-    # Job Information
-    job_info = {
-        "name": "dataset-dnasamples",
-        "job_type": bootstrap.JobType.CreateDataset,
-        "project": os.environ["WANDB_PROJECT_DNA_DATASETS"],
-        "group": "dataset/all"
-    }
 
-    _, config = bootstrap.init(argv, job_info, define_arguments)
+def main():
+    config = tfs.init(define_arguments)
 
-    # Set the seed if supplied
-    if config.seed is not None:
-        np.random.seed(config.seed)
+    dataset_path = create_dataset(config)
 
-    create_dataset(config)
-
-    # Log the dataset as an artifact
-    bootstrap.log_dataset_artifact("dnasamples", paths="dataset", metadata={
-        "train_split": 1.0 - config.val_split - config.test_split,
-        "val_split": config.val_split,
-        "test_split": config.test_split
-    })
-
+    # Upload an artifact of the model if requested
+    if config.log_artifact:
+        print("Logging artifact...")
+        assert bool(config.save_to)
+        tfs.log_artifact(config.log_artifact, dataset_path)
 
 if __name__ == "__main__":
-    sys.exit(bootstrap.boot(main, (sys.argv,)) or 0)
+    sys.exit(tfs.boot(main))
