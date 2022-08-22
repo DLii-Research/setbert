@@ -11,10 +11,16 @@ A repository of deep learning models for DNA samples and sequences.
 
 ### GAN
 
-- Vanilla GAN
 - Conditional GAN
+- Conditional WGAN
+- Conditional VEEGAN
+- Conditional VEEWGAN
 - Generative Adversarial Set Transformers (GAST)
+
 - DNAGAST
+- DNAWGAST
+- DNAVEEGAST
+- DNAVEEWGAST
 
 ## Dependencies
 
@@ -22,8 +28,8 @@ In order to run these models, you'll need to install the necessary dependencies 
 
 - [LMDBM (modified)](https://github.com/SirDavidLudwig/lmdb-python-dbm)
 - [Tensorflow](https://www.tensorflow.org/)
-- [tf-utils](https://github.com/DLii-Research/tf-utils)
-- [tf-set-transformer](https://github.com/DLii-Research/tf-set-transformer)
+- [tf-utilities](https://pypi.org/project/tf-utilities/)
+- [tf-settransformer](https://pypi.org/project/tf-settransformer/)
 - [Weights & Biases](https://wandb.ai)
 
 ## Training & Evaluation
