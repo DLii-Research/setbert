@@ -3,6 +3,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = '2'
 
 import tensorflow as tf
 import tensorflow.keras as keras
+import tf_utilities.scripting as tfs
 import sys
 
 import bootstrap
@@ -10,7 +11,6 @@ from common.data import find_dbs, random_subsamples, DnaLabelType, DnaSampleGene
 from common.models import dnabert, dnagast, gast
 from common.utils import plt_to_image, str_to_bool
 
-# For the DNA GAST callback
 from common.metrics import chamfer_distance_matrix, chamfer_distance_extend_matrix, mds
 import matplotlib.pyplot as plt
 import numpy as np
@@ -184,13 +184,7 @@ def create_model(config, num_samples):
 
 
 def load_model(path):
-    model = dnagast.DnaSampleConditionalVeeWGan.load(path)
-    if weights_path.endswith(".h5"):
-        model.load_weights(weights_path)
-    else:
-        with open(weights_path, "rb") as f:
-            model.set_weights(pickle.load(f))
-    return model
+    return dnagast.DnaSampleConditionalVeeWGan.load(path)
 
 
 class DnaGastMdsCallback(keras.callbacks.Callback):
@@ -445,27 +439,15 @@ def main(argv):
     if bootstrap.is_resumed():
         print("Restoring previous model...")
         model_path = bootstrap.restore_dir(config.save_to)
-        weights_path = bootstrap.restore(config.save_to + ".h5")
 
     if bootstrap.initial_epoch(config) < config.epochs:
-        train(config, model_path, weights_path)
+        train(config, model_path)
     else:
         print("Skipping training")
 
     # Upload an artifact of the model if requested
     if config.log_artifact:
-        print("Logging artifact...")
-        assert bool(config.save_to)
-        weights_file = config.save_to + ".h5"
-        if not os.path.exists(weights_file):
-            weights_file = config.save_to + ".data"
-        bootstrap.log_artifact(config.log_artifact, [
-            bootstrap.path_to(config.save_to),
-            bootstrap.path_to(config.save_to) + ".h5"
-        ])
-
-
-    print(config)
+        bootstrap.log_artifact(config.log_artifact, [bootstrap.path_to(config.save_to)])
 
 if __name__ == "__main__":
     sys.exit(bootstrap.boot(main, sys.argv))

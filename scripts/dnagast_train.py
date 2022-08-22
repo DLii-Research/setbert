@@ -1,9 +1,9 @@
 import os
-import pickle
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = '2'
 
 import tensorflow as tf
 import tensorflow.keras as keras
+import tf_utilities.scripting as tfs
 import sys
 
 import bootstrap
@@ -61,10 +61,10 @@ def define_arguments(cli):
 
 
 def fetch_dna_samples(config):
-    datadir = bootstrap.artifact(config, "dataset")
+    datadir = tfs.artifact(config, "dataset")
     path = os.path.join(datadir, "train")
     samples = find_dbs(path)
-    bootstrap.rng().shuffle(samples)
+    tfs.rng().shuffle(samples)
     return samples[:5]
 
 
@@ -80,13 +80,13 @@ def load_dataset(config, samples, encoder):
         augment=config.data_augment,
         balance=config.data_balance,
         labels=DnaLabelType.SampleIds,
-        rng=bootstrap.rng())
+        rng=tfs.rng())
     return dataset
 
 
 def create_model(config, num_samples):
     # Fetch the encoder
-    path = bootstrap.artifact(config, "dnabert")
+    path = tfs.artifact(config, "dnabert")
     encoder = dnabert.DnaBertEncoderModel(
         dnabert.DnaBertPretrainModel.load(path).base,
         use_kmer_encoder=True)
@@ -362,8 +362,8 @@ class DnaGastMdsCallback(keras.callbacks.Callback):
 
 def create_callbacks(config, test_samples):
     callbacks = []
-    if bootstrap.is_using_wandb():
-        callbacks.append(bootstrap.wandb_callback(save_weights_only=True))
+    if tfs.is_using_wandb():
+        callbacks.append(tfs.wandb_callback(save_weights_only=True))
     callbacks.append(DnaGastMdsCallback(
         samples=test_samples,
         subsample_size=config.subsample_length,
@@ -374,12 +374,12 @@ def create_callbacks(config, test_samples):
         augment=config.data_augment,
         balance=config.data_balance,
         workers=config.data_workers,
-        rng=bootstrap.rng()))
+        rng=tfs.rng()))
     return callbacks
 
 
 def train(config, model_path=None, weights_path=None):
-    with bootstrap.strategy(config).scope():
+    with tfs.strategy(config).scope():
 
         # Fetch the DNA sample files
         samples = fetch_dna_samples(config)
@@ -397,10 +397,10 @@ def train(config, model_path=None, weights_path=None):
         callbacks = create_callbacks(config, samples)
 
         # Train the model with keyboard-interrupt protection
-        bootstrap.run_safely(
+        tfs.run_safely(
             model.fit,
             data,
-            initial_epoch=bootstrap.initial_epoch(config),
+            initial_epoch=tfs.initial_epoch(config),
             subbatch_size=config.sub_batch_size,
             epochs=config.epochs,
             callbacks=callbacks,
@@ -408,24 +408,24 @@ def train(config, model_path=None, weights_path=None):
             workers=config.data_workers)
 
         # # Save the model
-        bootstrap.save_model(model, bootstrap.path_to(config.save_to))
+        tfs.save_model(model, tfs.path_to(config.save_to))
     return model
 
 
 def main(argv):
-    config = bootstrap.init(argv[1:], define_arguments)
+    config = tfs.init(argv[1:], define_arguments)
 
-    bootstrap.random_seed(config.seed)
+    tfs.random_seed(config.seed)
 
     # If this is a resumed run, we need to fetch the latest model run
     model_path = None
     weights_path = None
-    if bootstrap.is_resumed():
+    if tfs.is_resumed():
         print("Restoring previous model...")
-        model_path = bootstrap.restore_dir(config.save_to)
-        weights_path = bootstrap.restore(config.save_to + ".h5")
+        model_path = tfs.restore_dir(config.save_to)
+        weights_path = tfs.restore(config.save_to + ".h5")
 
-    if bootstrap.initial_epoch(config) < config.epochs:
+    if tfs.initial_epoch(config) < config.epochs:
         train(config, model_path, weights_path)
     else:
         print("Skipping training")
@@ -437,13 +437,13 @@ def main(argv):
         weights_file = config.save_to + ".h5"
         if not os.path.exists(weights_file):
             weights_file = config.save_to + ".data"
-        bootstrap.log_artifact(config.log_artifact, [
-            bootstrap.path_to(config.save_to),
-            bootstrap.path_to(config.save_to) + ".h5"
+        tfs.log_artifact(config.log_artifact, [
+            tfs.path_to(config.save_to),
+            tfs.path_to(config.save_to) + ".h5"
         ])
 
 
     print(config)
 
 if __name__ == "__main__":
-    sys.exit(bootstrap.boot(main, sys.argv))
+    sys.exit(tfs.boot(main, sys.argv))
