@@ -99,5 +99,5 @@ class MdsStressAnalysisProcess:
 
     def __call__(self, dim):
         mds = MDS(n_components=dim, dissimilarity="precomputed", **self.kwargs)
-        mds.fit_transform(self.dist_mat)
+        mds.fit(self.dist_mat)
         return mds.stress_
