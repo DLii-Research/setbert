@@ -148,7 +148,7 @@ class DnaBertDecoderModel(CustomModel):
                                         num_heads=self.num_heads,
                                         ff_dim=self.embed_dim,
                                         prenorm=self.pre_layernorm)(y)
-        y = keras.layers.Dense(5, activation="softmax")(y)
+        y = keras.layers.Dense(5)(y)
         return keras.Model(x, y)
 
     def call(self, inputs, training=None):
@@ -182,7 +182,7 @@ class DnaBertAutoencoderModel(CustomModel):
 
     def compile(self, **kwargs):
         if "loss" not in kwargs:
-            kwargs["loss"] = keras.losses.SparseCategoricalCrossentropy(from_logits=False)
+            kwargs["loss"] = keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         super().compile(**kwargs)
 
     def call(self, inputs, training=None):
