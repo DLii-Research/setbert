@@ -1,73 +1,85 @@
 import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = '2'
+
+import sys
 import tensorflow as tf
 import tensorflow.keras as keras
-import sys
+import tf_utilities.scripting as tfs
 
 import bootstrap
 from common.data import find_dbs, DnaLabelType, DnaSequenceGenerator
 from common.models import dnabert
 from common.utils import str_to_bool
 
+def define_arguments(cli):
 
-def define_arguments(parser):
-    # Pretrained model
-    parser.add_argument("--pretrained-model-artifact", type=str, default=None)
+    # General config
+    cli.use_strategy()
+
+    # Dataset artifact
+    cli.artifact("--dataset", type=str, required=True)
+
+    # Pretrained model artifact
+    cli.artifact("--pretrained-model", type=str, default=None)
 
     # Architecture settings
-    parser.add_argument("--embed-dim", type=int, default=128)
-    parser.add_argument("--stack", type=int, default=4)
-    parser.add_argument("--num-heads", type=int, default=4)
-    parser.add_argument("--pre-layernorm", type=str_to_bool, default=True)
+    cli.argument("--embed-dim", type=int, default=128)
+    cli.argument("--stack", type=int, default=4)
+    cli.argument("--num-heads", type=int, default=4)
+    cli.argument("--pre-layernorm", type=str_to_bool, default=True)
 
     # Training settings
-    parser.add_argument("--batches-per-epoch", type=int, default=100)
-    parser.add_argument("--val-batches-per-epoch", type=int, default=16)
-    parser.add_argument("--data-augment", type=str_to_bool, default=True)
-    parser.add_argument("--data-balance", type=str_to_bool, default=False)
-    parser.add_argument("--data-workers", type=int, default=1)
-    parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--batch-size", type=int, default=2000)
-    parser.add_argument("--sub-batch-size", type=int, default=1000)
-    parser.add_argument("--optimizer", type=str, choices=["adam", "nadam"], default="adam")
-    parser.add_argument("--lr", type=float, default=4e-4)
+    cli.use_training(epochs=250, batch_size=2000)
+    cli.argument("--seed", type=int, default=None)
+    cli.argument("--batches-per-epoch", type=int, default=100)
+    cli.argument("--val-batches-per-epoch", type=int, default=16)
+    cli.argument("--data-augment", type=str_to_bool, default=True)
+    cli.argument("--data-balance", type=str_to_bool, default=False)
+    cli.argument("--optimizer", type=str, choices=["adam", "nadam"], default="adam")
+    cli.argument("--lr", type=float, default=4e-4)
+
+    cli.argument("--log-artifact", type=str, default=None)
+    cli.argument("--save-to", type=str, default=None)
 
 
-def load_dataset(config, datadir, length, kmer):
+def load_datasets(config, pretrained_model):
+    datadir = tfs.artifact(config, "dataset")
     samples = find_dbs(datadir)
-    dataset = DnaSequenceGenerator(
+    print("Dataset artifact located at:", datadir)
+    print(f"Found samples ({len(samples)}):")
+    _, (train, val) = DnaSequenceGenerator.split(
         samples=samples,
-        sequence_length=length,
-        kmer=kmer,
+        split_ratios=[0.8, 0.2],
+        sequence_length=pretrained_model.length,
+        kmer=3,
         batch_size=config.batch_size,
-        batches_per_epoch=config.batches_per_epoch,
+        batches_per_epoch=[config.batches_per_epoch, config.val_batches_per_epoch],
         augment=config.data_augment,
         balance=config.data_balance,
         labels=DnaLabelType.OneMer,
-        rng=bootstrap.rng())
-    return dataset
+        rng=tfs.rng()
+    )
+    return (train, val)
 
 
-def load_datasets(config, length, kmer):
-    datadir = bootstrap.use_dataset(config)
-    datasets = []
-    for folder in ("train", "validation"):
-        datasets.append(load_dataset(config, os.path.join(datadir, folder), length, kmer))
-    return datasets
+def load_pretrained_model(config):
+    pretrain_path = tfs.artifact(config, "pretrained-model")
+    return dnabert.DnaBertPretrainModel.load(pretrain_path).base
 
 
-def create_model(config):
-    # Fetch the pretrained DNABERT model
-    pretrain_path = bootstrap.use_model(config.pretrained_model_artifact)
+def load_model(model_path):
+    return dnabert.DnaBertAutoencoderModel.load(path)
 
+
+def create_model(config, pretrained_model):
     # Create the model
-    base = dnabert.DnaBertPretrainModel.load(pretrain_path).base
-    encoder = dnabert.DnaBertEncoderModel(base)
+    encoder = dnabert.DnaBertEncoderModel(pretrained_model)
     decoder = dnabert.DnaBertDecoderModel(
-        length=base.length,
+        length=pretrained_model.length,
         embed_dim=config.embed_dim,
         stack=config.stack,
         num_heads=config.num_heads,
-        latent_dim=base.embed_dim,
+        latent_dim=pretrained_model.embed_dim,
         pre_layernorm=config.pre_layernorm)
     model = dnabert.DnaBertAutoencoderModel(encoder, decoder)
 
@@ -78,81 +90,88 @@ def create_model(config):
         optimizer = keras.optimizers.Nadam(config.lr)
 
     # Compile and return the model
-    model.compile(optimizer=optimizer, metrics=[
-        keras.metrics.SparseCategoricalAccuracy()
-    ])
+    model.compile(
+        optimizer=optimizer,
+        metrics=[
+            keras.metrics.SparseCategoricalAccuracy(),
+        ],
+        run_eagerly=config.run_eagerly)
     model(tf.zeros((1, encoder.base.length - encoder.base.kmer + 1)))
     model.summary()
     return model
 
 
-def load_model(path):
-    print("Loading previous model...")
-    return dnabert.DnaBertAutoencoderModel.load(path)
+def create_callbacks(config):
+    print("Creating callbacks...")
+    callbacks = []
+    if tfs.is_using_wandb():
+        callbacks.append(tfs.wandb_callback(save_weights_only=True))
+    return callbacks
 
 
-def train(config, model_path=None):
-    with bootstrap.strategy().scope():
+def train(config, model_path):
+    with tfs.strategy(config).scope():
+
+        # Load pretrained model
+        pretrained_model = load_pretrained_model(config)
+
+        print(pretrained_model.length)
+
+        # Load the dataset
+        train_data, val_data = load_datasets(config, pretrained_model)
+
         # Create the autoencoder model
         if model_path is not None:
             model = load_model(model_path)
         else:
-            model = create_model(config)
-
-        # Load the dataset using the base DNABERT model parameters
-        length = model.encoder.base.length
-        kmer = model.encoder.base.kmer
-        train_data, val_data = load_datasets(config, length, kmer)
+            model = create_model(config, pretrained_model)
 
         # Create any collbacks we may need
-        callbacks = bootstrap.callbacks({})
+        callbacks = create_callbacks(config)
 
         # Train the model with keyboard-interrupt protection
-        bootstrap.run_safely(
+        tfs.run_safely(
             model.fit,
             train_data,
             validation_data=val_data,
-            initial_epoch=bootstrap.initial_epoch(),
             subbatch_size=config.sub_batch_size,
+            initial_epoch=tfs.initial_epoch(config),
             epochs=config.epochs,
             callbacks=callbacks,
             use_multiprocessing=(config.data_workers > 1),
             workers=config.data_workers)
 
         # Save the model
-        bootstrap.save_model(model)
+        if config.save_to:
+            tfs.save_model(model, tfs.path_to(config.save_to))
 
     return model
 
 
-def main(argv):
-    # Job Information
-    job_info = {
-        "name": "finetune",
-        "job_type": bootstrap.JobType.Finetune,
-        "project": os.environ["WANDB_PROJECT_DNABERT_AUTOENCODER"],
-        "group": "finetune"
-    }
+def main():
+    config = tfs.init(define_arguments)
 
-    # Initialize the job and load the config
-    job_config, config = bootstrap.init(argv, job_info, define_arguments)
+    # Set the random seed
+    tfs.random_seed(config.seed)
 
     # If this is a resumed run, we need to fetch the latest model run
     model_path = None
-    if bootstrap.is_resumed():
+    if tfs.is_resumed():
         print("Restoring previous model...")
-        model_path = bootstrap.restore_dir(config.save_to)
+        model_path = tfs.restore_dir(config.save_to)
 
     # Train the model if necessary
-    if bootstrap.initial_epoch() < config.epochs:
+    if tfs.initial_epoch(config) < config.epochs:
         train(config, model_path)
     else:
-        print("Skipping training...")
+        print("Skipping training")
 
     # Upload an artifact of the model if requested
-    if job_config.log_artifacts:
-        bootstrap.log_model_artifact(bootstrap.group().replace('/', '-'))
+    if config.log_artifact:
+        print("Logging artifact to", config.save_to)
+        assert bool(config.save_to)
+        tfs.log_artifact(config.log_artifact, tfs.path_to(config.save_to), type="model")
 
 
 if __name__ == "__main__":
-    sys.exit(bootstrap.boot(main, (sys.argv,)) or 0)
+    sys.exit(tfs.boot(main))

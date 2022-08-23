@@ -1,8 +1,9 @@
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = '2'
 
-import tensorflow.keras as keras
 import sys
+import tensorflow.keras as keras
+import tf_utilities.scripting as tfs
 
 import bootstrap
 from common.callbacks import LearningRateStepScheduler
@@ -44,7 +45,7 @@ def define_arguments(cli):
 
 
 def load_datasets(config):
-    datadir = bootstrap.artifact(config, "dataset")
+    datadir = tfs.artifact(config, "dataset")
     samples = find_dbs(datadir)
     print("Dataset artifact located at:", datadir)
     print(f"Found samples ({len(samples)}):")
@@ -54,11 +55,11 @@ def load_datasets(config):
         sequence_length=config.length,
         kmer=config.kmer,
         batch_size=config.batch_size,
-        batches_per_epoch=config.batches_per_epoch,
+        batches_per_epoch=[config.batches_per_epoch, config.val_batches_per_epoch],
         augment=config.data_augment,
         balance=config.data_balance,
         labels=DnaLabelType.KMer,
-        rng=bootstrap.rng()
+        rng=tfs.rng()
     )
     return (train, val)
 
@@ -103,8 +104,8 @@ def load_model(model_path, weights_path):
 def create_callbacks(config):
     print("Creating callbacks...")
     callbacks = []
-    if bootstrap.is_using_wandb():
-        callbacks.append(bootstrap.wandb_callback(save_weights_only=True))
+    if tfs.is_using_wandb():
+        callbacks.append(tfs.wandb_callback(save_weights_only=True))
     if config.warmup_steps is not None:
         callbacks.append(LearningRateStepScheduler(
             init_lr = config.init_lr,
@@ -116,7 +117,7 @@ def create_callbacks(config):
 
 
 def train(config, model_path, weights_path):
-    with bootstrap.strategy(config).scope():
+    with tfs.strategy(config).scope():
         # Load the dataset
         train_data, val_data = load_datasets(config)
 
@@ -130,12 +131,12 @@ def train(config, model_path, weights_path):
         callbacks = create_callbacks(config)
 
         # Train the model with keyboard-interrupt protection
-        bootstrap.run_safely(
+        tfs.run_safely(
             model.fit,
             train_data,
             validation_data=val_data,
             subbatch_size=config.sub_batch_size,
-            initial_epoch=bootstrap.initial_epoch(config),
+            initial_epoch=tfs.initial_epoch(config),
             epochs=config.epochs,
             callbacks=callbacks,
             use_multiprocessing=(config.data_workers > 1),
@@ -143,29 +144,29 @@ def train(config, model_path, weights_path):
 
         # Save the model
         if config.save_to:
-            bootstrap.save_model(model, bootstrap.path_to(config.save_to))
+            tfs.save_model(model, tfs.path_to(config.save_to))
 
     return model
 
 
 def main(argv):
-    config = bootstrap.init(argv[1:], define_arguments)
+    config = tfs.init(argv[1:], define_arguments)
 
     # Set the random seed
-    bootstrap.random_seed(config.seed)
+    tfs.random_seed(config.seed)
 
     # If this is a resumed run, we need to fetch the latest model run
     model_path = None
     weights_path = None
-    if bootstrap.is_resumed():
+    if tfs.is_resumed():
         print("Restoring previous model...")
-        model_path = bootstrap.restore_dir(config.save_to)
-        weights_path = bootstrap.restore(config.save_to + ".h5")
+        model_path = tfs.restore_dir(config.save_to)
+        weights_path = tfs.restore(config.save_to + ".h5")
 
     print(config)
 
     # Train the model if necessary
-    if bootstrap.initial_epoch(config) < config.epochs:
+    if tfs.initial_epoch(config) < config.epochs:
         train(config, model_path, weights_path)
     else:
         print("Skipping training")
@@ -174,11 +175,11 @@ def main(argv):
     if config.log_artifact:
         print("Logging artifact to", config.save_to)
         assert bool(config.save_to)
-        bootstrap.log_artifact(config.log_artifact, [
-            bootstrap.path_to(config.save_to),
-            bootstrap.path_to(config.save_to) + ".h5"
+        tfs.log_artifact(config.log_artifact, [
+            tfs.path_to(config.save_to),
+            tfs.path_to(config.save_to) + ".h5"
         ], type="model")
 
 
 if __name__ == "__main__":
-    sys.exit(bootstrap.boot(main, sys.argv))
+    sys.exit(tfs.boot(main, sys.argv))
