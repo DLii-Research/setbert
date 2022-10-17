@@ -110,6 +110,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         augment=True,
         balance=False,
         labels=None,
+        mask_ratio=None,
         rng=None,
         **kwargs
     ):
@@ -146,7 +147,8 @@ class DnaSequenceGenerator(keras.utils.Sequence):
             print(f"Sample '{samples[i]}' does not contain enough sequences. This sample will be ignored.")
             del samples[i]
             del stores[i]
-            np.delete(split_indices, i)
+            for group in split_indices:
+                del group[i]
 
         generators = []
         for i in range(len(split_indices)):
@@ -159,6 +161,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
                 augment=augment,
                 balance=balance,
                 labels=labels,
+                mask_ratio=mask_ratio,
                 indices=split_indices[i],
                 rng=rng,
                 **kwargs)
@@ -175,6 +178,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         augment=True,
         balance=False,
         labels=None,
+        mask_ratio=None,
         indices=None,
         rng=None
     ):
@@ -187,6 +191,7 @@ class DnaSequenceGenerator(keras.utils.Sequence):
         self.augment = augment
         self.balance = balance
         self.labels = labels
+        self.mask_ratio = mask_ratio
         self.indices = indices
         self.rng = rng if rng is not None else np.random.default_rng()
         self.is_initialized = False
@@ -226,14 +231,14 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 
         # Included label types in the returned batches
         if self.labels == DnaLabelType.SampleIds:
-            self.post_process_batch = lambda batch, batch_index: (
+            self.attach_batch_labels = lambda batch, batch_index: (
                 self.batch_to_kmers(batch), self.sample_indices[batch_index])
         elif self.labels == DnaLabelType.OneMer:
-            self.post_process_batch = lambda batch, batch_index: (self.batch_to_kmers(batch), batch)
+            self.attach_batch_labels = lambda batch, batch_index: (self.batch_to_kmers(batch), batch)
         elif self.labels == DnaLabelType.KMer:
-            self.post_process_batch = lambda batch, _: 2*(self.batch_to_kmers(batch),)
+            self.attach_batch_labels = lambda batch, _: 2*(self.batch_to_kmers(batch),)
         else:
-            self.post_process_batch = lambda batch, _: self.batch_to_kmers(batch)
+            self.attach_batch_labels = lambda batch, _: self.batch_to_kmers(batch)
 
         # Shuffle the indices
         self.shuffle()
@@ -268,7 +273,11 @@ class DnaSequenceGenerator(keras.utils.Sequence):
 
     def __getitem__(self, batch_index):
         batch = self.generate_batch(batch_index)
-        return self.post_process_batch(batch, batch_index)
+        batch = self.attach_batch_labels(batch, batch_index)
+        batch = self.post_process_batch(batch, batch_index)
+        if self.mask_ratio is not None:
+            batch = (batch[0], batch[1][:,:int(self.mask_ratio*batch[1].shape[1])])
+        return batch
 
     def generate_batch(self, batch_index):
         if not self.is_initialized:
@@ -282,6 +291,9 @@ class DnaSequenceGenerator(keras.utils.Sequence):
             sequence = self.samples[sample_indices[i]][str(sequence_index).encode()]
             offset = self.augment_offset_fn(len(sequence), augment_index=(batch_index, i))
             batch[i] = np.frombuffer(self.clip_sequence(sequence, offset), dtype=np.uint8)
+        return batch
+
+    def post_process_batch(self, batch, batch_index):
         return batch
 
     def on_epoch_end(self):
@@ -307,6 +319,7 @@ class DnaSampleGenerator(DnaSequenceGenerator):
         augment=True,
         balance=False,
         labels=None,
+        mask_ratio=None,
         rng=None,
         **kwargs
     ):
@@ -321,6 +334,7 @@ class DnaSampleGenerator(DnaSequenceGenerator):
             augment=augment,
             balance=balance,
             labels=labels,
+            mask_ratio=mask_ratio,
             rng=rng,
             **kwargs)
         # Find generators with too few sequences
@@ -348,6 +362,7 @@ class DnaSampleGenerator(DnaSequenceGenerator):
         augment=True,
         balance=False,
         labels=None,
+        mask_ratio=None,
         indices=None,
         rng=None,
         **kwargs
@@ -366,6 +381,7 @@ class DnaSampleGenerator(DnaSequenceGenerator):
             augment=augment,
             balance=balance,
             labels=labels,
+            mask_ratio=mask_ratio,
             indices=indices,
             rng=rng,
             **kwargs)
