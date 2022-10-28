@@ -78,6 +78,72 @@ class ContiguousMask(keras.layers.Layer):
         return config
 
 @CustomObject
+class TrimAndContiguousMask(keras.layers.Layer):
+    """
+    Mask out contiguous blocks of input tokens (provided as integers).
+
+    Ensure input is properly encoded: 0=mask token, 1=pad token
+    """
+    def __init__(self, min_len, max_len, mask_ratio, **kwargs):
+        super().__init__(**kwargs)
+        self.min_len = tf.Variable(
+            min_len, trainable=False, dtype=tf.int32, name="Min_Len")
+        self.max_len = tf.Variable(
+            max_len, trainable=False, dtype=tf.int32, name="Max_Len")
+        self.mask_ratio = tf.Variable(
+            mask_ratio, trainable=False, dtype=tf.float32, name="Mask_Ratio")
+
+    def call(self, inputs):
+        inputs = tf.cast(inputs, dtype=tf.int32)
+        batch_size = tf.shape(inputs)[0]
+
+        # Compute the trimmed lengths
+        lengths = tf.random.uniform((batch_size,), minval=self.min_len, maxval=self.max_len + 1, dtype=tf.int32)
+
+        # Compute the offsets for each sequence
+        max_offsets = tf.cast(tf.fill((batch_size,), self.max_len) - lengths, dtype=tf.float32)
+        offsets = tf.cast(tf.random.uniform((batch_size,)) * (max_offsets + 1.0), dtype=tf.int32)
+
+        # Assemble the trim mask
+        left = tf.logical_not(tf.sequence_mask(offsets, self.max_len))
+        right = tf.sequence_mask(offsets + lengths, self.max_len)
+        trim_mask = tf.logical_and(left, right)
+
+        # Compute the lengths of each mask
+        mask_lengths = tf.cast(tf.math.ceil(tf.random.uniform((batch_size,)) * tf.cast(lengths, dtype=tf.float32) * self.mask_ratio), dtype=tf.int32)
+
+        # Compute the mask offset
+        max_mask_offsets = lengths - mask_lengths
+        mask_offsets = tf.cast(tf.random.uniform((batch_size,)) * tf.cast(max_mask_offsets + 1, dtype=tf.float32), dtype=tf.int32)
+
+        # Assemble the mask mask
+        left = tf.sequence_mask(offsets + mask_offsets, self.max_len)
+        right = tf.logical_not(tf.sequence_mask(offsets + mask_offsets + mask_lengths, self.max_len))
+        mask_mask = tf.logical_or(left, right)
+
+        # Combine the masks together
+        total_mask = tf.cast(tf.logical_and(trim_mask, mask_mask), dtype=tf.int32)
+
+        # Zero-out the tokens to be masked/padded
+        result = total_mask * inputs
+
+        # Compute and add the pad tokens to the result
+        pad_tokens = tf.ones_like(inputs) * tf.cast(tf.logical_not(trim_mask), dtype=tf.int32)
+        result += pad_tokens
+
+        # Return the masked inputs
+        return result
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "min_len": self.min_len,
+            "max_len": self.max_len,
+            "mask_ratio": self.mask_ratio.numpy()
+        })
+        return config
+
+@CustomObject
 class InvertMask(keras.layers.Layer):
     """
     Invert the current mask. Useful for DNABERT models where we *want* to pay attention to the
