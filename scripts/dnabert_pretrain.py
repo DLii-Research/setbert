@@ -33,6 +33,8 @@ def define_arguments(cli):
     cli.argument("--val-batches-per-epoch", type=int, default=16)
     cli.argument("--data-augment", type=str_to_bool, default=True)
     cli.argument("--data-balance", type=str_to_bool, default=False)
+    cli.argument("--min-len", type=int, default=None)
+    cli.argument("--max-len", type=int, default=None)
     cli.argument("--mask-ratio", type=float, default=0.15)
     cli.argument("--optimizer", type=str, choices=["adam", "nadam"], default="adam")
     cli.argument("--lr", type=float, default=4e-4)
@@ -72,10 +74,13 @@ def create_model(config):
         embed_dim=config.embed_dim,
         stack=config.stack,
         num_heads=config.num_heads,
-        pre_layernorm=config.pre_layernorm)
+        pre_layernorm=config.pre_layernorm,
+        variable_length=(config.max_len is not None or config.min_len is not None))
     model = dnabert.DnaBertPretrainModel(
         base=base,
-        mask_ratio=config.mask_ratio)
+        mask_ratio=config.mask_ratio,
+        min_len=config.min_len,
+        max_len=config.max_len)
 
     if config.optimizer == "adam":
         optimizer = keras.optimizers.Adam(config.lr)
@@ -93,11 +98,9 @@ def create_model(config):
     return model
 
 
-def load_model(model_path, weights_path):
+def load_model(model_path):
     print("Loading model...")
     model = dnabert.DnaBertPretrainModel.load(path)
-    print("Setting weights...")
-    model.load_weights(weights_path)
     return model
 
 
@@ -105,18 +108,18 @@ def create_callbacks(config):
     print("Creating callbacks...")
     callbacks = []
     if tfs.is_using_wandb():
-        callbacks.append(tfs.wandb_callback(save_weights_only=True))
-    if config.warmup_steps is not None:
-        callbacks.append(LearningRateStepScheduler(
-            init_lr = config.init_lr,
-            max_lr=config.lr,
-            warmup_steps=config.warmup_steps,
-            end_steps=config.batches_per_epoch*config.epochs
-        ))
+        callbacks.append(tfs.wandb_callback(save_model=False))
+    # if config.warmup_steps is not None:
+        # callbacks.append(LearningRateStepScheduler(
+        #     init_lr = config.init_lr,
+        #     max_lr=config.lr,
+        #     warmup_steps=config.warmup_steps,
+        #     end_steps=config.batches_per_epoch*config.epochs
+        # ))
     return callbacks
 
 
-def train(config, model_path, weights_path):
+def train(config, model_path):
     with tfs.strategy(config).scope():
         # Load the dataset
         train_data, val_data = load_datasets(config)
@@ -144,30 +147,28 @@ def train(config, model_path, weights_path):
 
         # Save the model
         if config.save_to:
-            tfs.save_model(model, tfs.path_to(config.save_to))
+            model.save(tfs.path_to(config.save_to))
 
     return model
 
 
 def main(argv):
-    config = tfs.init(argv[1:], define_arguments)
+    config = tfs.init(define_arguments, argv[1:])
 
     # Set the random seed
     tfs.random_seed(config.seed)
 
     # If this is a resumed run, we need to fetch the latest model run
     model_path = None
-    weights_path = None
     if tfs.is_resumed():
         print("Restoring previous model...")
         model_path = tfs.restore_dir(config.save_to)
-        weights_path = tfs.restore(config.save_to + ".h5")
 
     print(config)
 
     # Train the model if necessary
     if tfs.initial_epoch(config) < config.epochs:
-        train(config, model_path, weights_path)
+        train(config, model_path)
     else:
         print("Skipping training")
 
@@ -176,8 +177,7 @@ def main(argv):
         print("Logging artifact to", config.save_to)
         assert bool(config.save_to)
         tfs.log_artifact(config.log_artifact, [
-            tfs.path_to(config.save_to),
-            tfs.path_to(config.save_to) + ".h5"
+            tfs.path_to(config.save_to)
         ], type="model")
 
 
