@@ -2,8 +2,8 @@ import tensorflow as tf
 import tensorflow.keras as keras
 from . import CustomModel
 from .. core.custom_objects import CustomObject
-from .. layers import InvertMask, ContiguousMask, EmbeddingWithClassToken, KmerEncoder, SplitClassToken, \
-                      RelativeTransformerBlock
+from .. layers import InvertMask, ContiguousMask, TrimAndContiguousMask, EmbeddingWithClassToken, \
+                      KmerEncoder, SplitClassToken, RelativeTransformerBlock
 
 # Model Definitions --------------------------------------------------------------------------------
 
@@ -12,7 +12,7 @@ class DnaBertModel(CustomModel):
     """
     The base DNABERT model definition.
     """
-    def __init__(self, length, kmer, embed_dim, stack, num_heads, pre_layernorm=False, **kwargs):
+    def __init__(self, length, kmer, embed_dim, stack, num_heads, pre_layernorm=False, variable_length=False, **kwargs):
         super().__init__(**kwargs)
         self.length = length
         self.kmer = kmer
@@ -20,11 +20,13 @@ class DnaBertModel(CustomModel):
         self.stack = stack
         self.num_heads = num_heads
         self.pre_layernorm = pre_layernorm
+        self.variable_length = variable_length
         self.model = self.build_model()
 
     def build_model(self):
+        additional_tokens = 1 + int(self.variable_length)
         y = x = keras.layers.Input((self.length - self.kmer + 1,), dtype=tf.int32)
-        y = EmbeddingWithClassToken(5**self.kmer + 1, embed_dim=self.embed_dim, mask_zero=True)(y)
+        y = EmbeddingWithClassToken(5**self.kmer + additional_tokens, embed_dim=self.embed_dim, mask_zero=True)(y)
         for _ in range(self.stack):
             y = RelativeTransformerBlock(embed_dim=self.embed_dim,
                                          num_heads=self.num_heads,
@@ -56,15 +58,25 @@ class DnaBertPretrainModel(CustomModel):
     """
     The DNABERT pretraining model architecture
     """
-    def __init__(self, base, mask_ratio=0.15, **kwargs):
+    def __init__(self, base, mask_ratio=0.15, min_len=None, max_len=None, **kwargs):
         super().__init__(**kwargs)
         self.base = base
-        self.masking = ContiguousMask(mask_ratio)
+        self.min_len = min_len
+        self.max_len = max_len
+        if self.base.variable_length:
+            # Default length values
+            max_len = self.base.length if self.max_len is None else self.max_len
+            min_len = max_len if self.min_len is None else self.min_len
+            assert min_len <= max_len
+            self.masking = TrimAndContiguousMask(min_len - self.base.kmer + 1, max_len - self.base.kmer + 1, mask_ratio)
+        else:
+            self.masking = ContiguousMask(mask_ratio)
         self.model = self.build_model()
 
     def build_model(self):
+        additional_tokens = 1 + int(self.base.variable_length)
         y = x = keras.layers.Input((self.base.length - self.base.kmer + 1,), dtype=tf.int32)
-        y = keras.layers.Lambda(lambda x: x + 1)(y) # Make room for mask
+        y = keras.layers.Lambda(lambda x: x + additional_tokens)(y) # Make room for mask
         y = self.masking(y)
         y = self.base(y)
         _, y = SplitClassToken()(y)
@@ -87,6 +99,8 @@ class DnaBertPretrainModel(CustomModel):
         config = super().get_config()
         config.update({
             "base": self.base,
+            "min_len": self.min_len,
+            "max_len": self.max_len,
             "mask_ratio": self.masking.mask_ratio.numpy()
         })
         return config
