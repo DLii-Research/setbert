@@ -26,7 +26,7 @@ A repository of deep learning models for DNA samples and sequences.
 
 In order to run these models, you'll need to install the necessary dependencies from my other repositories linked below.
 
-- [LMDBM (modified)](https://github.com/SirDavidLudwig/lmdb-python-dbm)
+- [lmdbm-lockable](https://github.com/SirDavidLudwig/lmdb-python-dbm)
 - [Tensorflow](https://www.tensorflow.org/)
 - [tf-utilities](https://pypi.org/project/tf-utilities/)
 - [tf-settransformer](https://pypi.org/project/tf-settransformer/)

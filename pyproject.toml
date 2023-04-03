@@ -1,0 +1,23 @@
+[project]
+name = "deep-learning-dna"
+authors = [
+  { name="David W. Ludwig II", email="davidludwigii@gmail.com" }
+]
+description = "Deep learning models for handling DNA sequences and high-throughput sequencing samples."
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+  "lmdbm-lockable >= 0.0.5",
+  "dnadb >= 0.1.4",
+  "tf-settransformer >= 0.2.5",
+  "tensorflow >= 2.10.0",
+  "tf-utilities >= 0.1.5"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/DLii-Research/deep-learning-dna"
+"Bug Tracker" = "https://github.com/DLii-Research/deep-learning-dna/issues"
+
+[tool.ruff]
+line-length = 100

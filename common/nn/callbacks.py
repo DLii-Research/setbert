@@ -1,8 +1,9 @@
-import tensorflow.keras as keras
+import tensorflow as tf
 
-class LearningRateStepScheduler(keras.callbacks.Callback):
+class LearningRateStepScheduler(tf.keras.callbacks.Callback):
     def __init__(self, init_lr, max_lr, warmup_steps, end_steps):
         super().__init__()
+        self.model: tf.keras.Model
         self.step = 0
         self.init_lr = init_lr
         self.max_lr = max_lr
@@ -14,7 +15,8 @@ class LearningRateStepScheduler(keras.callbacks.Callback):
         if self.step < self.warmup_steps:
             lr = self.init_lr + (self.max_lr - self.init_lr)*(self.step/self.warmup_steps)
         else:
-            lr = self.max_lr - (self.max_lr)*((self.step - self.warmup_steps)/(self.end_steps - self.warmup_steps))
+            lr = self.max_lr - (self.max_lr)*(
+                (self.step - self.warmup_steps)/(self.end_steps - self.warmup_steps))
         self.model.optimizer.learning_rate.assign(lr)
 
     def on_epoch_end(self, epoch, logs=None):
