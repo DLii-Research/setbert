@@ -9,10 +9,11 @@ license = { file="LICENSE" }
 requires-python = ">=3.10"
 dependencies = [
   "lmdbm-lockable >= 0.0.5",
-  "dnadb >= 0.1.4",
+  "dnadb >= 0.2.1",
   "tf-settransformer >= 0.2.5",
   "tensorflow >= 2.10.0",
-  "tf-utilities >= 0.1.5"
+  "tf-utilities >= 0.1.5",
+  "wandb >= 0.14.0"
 ]
 
 [project.urls]
