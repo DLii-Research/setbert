@@ -1,29 +1,30 @@
-import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = '2'
-
-import sys
-import tensorflow.keras as keras
-import tf_utilities.scripting as tfs
-
 import bootstrap
-from common.callbacks import LearningRateStepScheduler
-from common.data import find_dbs, DnaLabelType, DnaSequenceGenerator
-from common.models import dnabert
-from common.utils import str_to_bool
+from dnadb import fasta
+from pathlib import Path
+import sys
+import tensorflow as tf
+import tf_utilities.scripting as tfs
+from tf_utilities.utils import str_to_bool
+from common.dataset import Dataset
+from common.nn.callbacks import LearningRateStepScheduler
+from common.nn.data_generators import FastaSequenceGenerator
+from common.nn.models import dnabert, load_model
+from common.nn.utils import optimizer
 
 def define_arguments(cli):
     # General config
+    cli.use_wandb()
     cli.use_strategy()
 
-    # Dataset artifact
-    cli.artifact("--dataset", type=str, required=True)
+    # Dataset path
+    cli.argument("--dataset-path", type=str, required=True)
 
     # Architecture Settings
-    cli.argument("--length", type=int, default=150)
+    cli.argument("--sequence-length", type=int, default=150)
     cli.argument("--kmer", type=int, default=3)
     cli.argument("--embed-dim", type=int, default=128)
     cli.argument("--stack", type=int, default=8)
-    cli.argument("--num-heads", type=int, default=4)
+    cli.argument("--num-heads", type=int, default=8)
     cli.argument("--pre-layernorm", type=str_to_bool, default=True)
 
     # Training settings
@@ -46,30 +47,34 @@ def define_arguments(cli):
     cli.argument("--log-artifact", type=str, default=None)
 
 
-def load_datasets(config):
-    datadir = tfs.artifact(config, "dataset")
-    samples = find_dbs(datadir)
-    print("Dataset artifact located at:", datadir)
-    print(f"Found samples ({len(samples)}):")
-    _, (train, val) = DnaSequenceGenerator.split(
-        samples=samples,
-        split_ratios=[0.8, 0.2],
-        sequence_length=config.length,
-        kmer=config.kmer,
-        batch_size=config.batch_size,
-        batches_per_epoch=[config.batches_per_epoch, config.val_batches_per_epoch],
-        augment=config.data_augment,
-        balance=config.data_balance,
-        labels=DnaLabelType.KMer,
-        rng=tfs.rng()
+def load_datasets(config) -> tuple[FastaSequenceGenerator, FastaSequenceGenerator|None]:
+    dataset = Dataset(config.dataset_path)
+    generator_args = dict(
+        sequence_length = config.sequence_length,
+        kmer = config.kmer,
+        batch_size = config.batch_size,
     )
-    return (train, val)
+    train = FastaSequenceGenerator(
+        map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Train)),
+        batches_per_epoch=config.batches_per_epoch,
+        rng = tfs.rng(),
+        **generator_args
+    )
+    validation = None
+    if dataset.has_split(Dataset.Split.Test):
+        validation = FastaSequenceGenerator(
+            map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Test)),
+            batches_per_epoch=config.val_batches_per_epoch,
+            rng = tfs.rng(),
+            **generator_args
+        )
+    return (train, validation)
 
 
 def create_model(config):
     print("Creating model...")
     base = dnabert.DnaBertModel(
-        length=config.length,
+        sequence_length=config.sequence_length,
         kmer=config.kmer,
         embed_dim=config.embed_dim,
         stack=config.stack,
@@ -82,26 +87,19 @@ def create_model(config):
         min_len=config.min_len,
         max_len=config.max_len)
 
-    if config.optimizer == "adam":
-        optimizer = keras.optimizers.Adam(config.lr)
-    elif config.optimizer == "nadam":
-        optimizer = keras.optimizers.Nadam(config.lr)
-
     model.compile(
-        optimizer=optimizer,
+        optimizer=optimizer(config.optimizer, learning_rate=config.lr),
         metrics=[
-            keras.metrics.SparseCategoricalAccuracy(),
+            tf.keras.metrics.SparseCategoricalAccuracy(),
         ],
         run_eagerly=config.run_eagerly
     )
-
     return model
 
 
-def load_model(model_path):
-    print("Loading model...")
-    model = dnabert.DnaBertPretrainModel.load(path)
-    return model
+def load_previous_model(path: str|Path) -> dnabert.DnaBertPretrainModel:
+    print("Loading model from previous run:", path)
+    return load_model(path)
 
 
 def create_callbacks(config):
@@ -109,18 +107,18 @@ def create_callbacks(config):
     callbacks = []
     if tfs.is_using_wandb():
         callbacks.append(tfs.wandb_callback(save_model=False))
-    # if config.warmup_steps is not None:
-        # callbacks.append(LearningRateStepScheduler(
-        #     init_lr = config.init_lr,
-        #     max_lr=config.lr,
-        #     warmup_steps=config.warmup_steps,
-        #     end_steps=config.batches_per_epoch*config.epochs
-        # ))
+    if config.warmup_steps is not None:
+        callbacks.append(LearningRateStepScheduler(
+            init_lr = config.init_lr,
+            max_lr=config.lr,
+            warmup_steps=config.warmup_steps,
+            end_steps=config.batches_per_epoch*config.epochs
+        ))
     return callbacks
 
 
 def train(config, model_path):
-    with tfs.strategy(config).scope():
+    with tfs.strategy(config).scope(): # type: ignore
         # Load the dataset
         train_data, val_data = load_datasets(config)
 

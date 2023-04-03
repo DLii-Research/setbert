@@ -119,7 +119,7 @@ class FastaSequenceGenerator(BatchGenerator):
     """
     def __init__(
         self,
-        samples: list[fasta.FastaDb],
+        samples: Iterable[fasta.FastaDb],
         sequence_length: int = 150,
         kmer: int = 1,
         batch_size: int = 32,
@@ -150,7 +150,7 @@ class FastaSequenceGenerator(BatchGenerator):
             sequences = np.squeeze(sequences, axis=1)
         x = y = sequences
         if self.kmer > 1:
-            kmers = dna.encode_kmers(x, self.kmer, self.sampler.augment_ambiguous_bases) # type: ignore
+            kmers = dna.encode_kmers(x, self.kmer, not self.sampler.augment_ambiguous_bases) # type: ignore
             x = kmers if self.use_kmer_inputs else x
             y = kmers if self.use_kmer_labels else y
         return x, y
@@ -208,7 +208,8 @@ class FastaTaxonomyGenerator(BatchGenerator):
             sequences = np.squeeze(sequences, axis=1)
             labels = np.squeeze(labels, axis=1)
         if self.kmer > 1:
-            sequences = dna.encode_kmers(sequences, self.kmer, self.sampler.augment_ambiguous_bases) # type: ignore
+            sequences = dna.encode_kmers(
+                sequences, self.kmer, not self.sampler.augment_ambiguous_bases) # type: ignore
         return sequences, labels
 
     @property
