@@ -3,6 +3,8 @@ import numpy as np
 import tensorflow as tf
 from typing import cast, Iterable
 
+from .models import dnabert
+
 class BatchGenerator(tf.keras.utils.Sequence):
     def __init__(
         self,
@@ -164,6 +166,55 @@ class FastaSequenceGenerator(BatchGenerator):
         return self.sampler.sequence_length
 
 
+class FastaSampleGenerator(BatchGenerator):
+    """
+    Generate sequences from given FASTA files with the sample FASTA as the label.
+    """
+    def __init__(
+        self,
+        samples: Iterable[fasta.FastaDb],
+        sequence_length: int = 150,
+        kmer: int = 1,
+        batch_size: int = 32,
+        batches_per_epoch: int = 100,
+        subsample_size: int = 0,
+        augment_slide: bool = True,
+        augment_ambiguous_bases: bool = True,
+        use_kmer_inputs: bool = True,
+        use_kmer_labels: bool = True,
+        rng: np.random.Generator = np.random.default_rng()
+    ):
+        super().__init__(batch_size, batches_per_epoch, rng)
+        self.sampler = FastaSampler(
+            samples,
+            sequence_length,
+            augment_slide=augment_slide,
+            augment_ambiguous_bases=augment_ambiguous_bases)
+        self.kmer = kmer
+        self.subsample_size = subsample_size
+        self.use_kmer_inputs = use_kmer_inputs
+        self.use_kmer_labels = use_kmer_labels
+
+    def generate_batch(self, rng: np.random.Generator):
+        sample_indices, entries = self.sampler.sample_entries(
+            self.batch_size, max(1, self.subsample_size), rng)
+        sequences = self.sampler.sequences(entries, rng)
+        if self.subsample_size == 0:
+            sequences = np.squeeze(sequences, axis=1)
+        if self.kmer > 1:
+            sequences = dna.encode_kmers(
+                sequences, self.kmer, not self.sampler.augment_ambiguous_bases) # type: ignore
+        return sequences, sample_indices
+
+    @property
+    def samples(self):
+        return self.sampler.samples
+
+    @property
+    def sequence_length(self):
+        return self.sampler.sequence_length
+
+
 class FastaTaxonomyGenerator(BatchGenerator):
     """
     Generate sequences from given FASTA files.
@@ -219,3 +270,45 @@ class FastaTaxonomyGenerator(BatchGenerator):
     @property
     def sequence_length(self):
         return self.sampler.sequence_length
+
+
+class FastaSequenceEmbeddingGenerator(FastaSequenceGenerator):
+    def __init__(
+        self,
+        samples: Iterable[fasta.FastaDb],
+        dnabert_base: dnabert.DnaBertModel,
+        batch_size: int = 16,
+        batches_per_epoch: int = 100,
+        subsample_size: int = 0,
+        augment_slide: bool = True,
+        augment_ambiguous_bases: bool = True,
+        encoder_batch_size: int = 1,
+        rng: np.random.Generator = np.random.default_rng()
+    ):
+        super().__init__(
+            samples=samples,
+            sequence_length=dnabert_base.sequence_length,
+            kmer=dnabert_base.kmer,
+            batch_size=batch_size,
+            batches_per_epoch=batches_per_epoch,
+            subsample_size=subsample_size,
+            augment_slide=augment_slide,
+            augment_ambiguous_bases=augment_ambiguous_bases,
+            rng=rng
+        )
+        self.encoder_batch_size = encoder_batch_size
+        self.encoder = dnabert.DnaBertEncoderModel(dnabert_base, subsamples=self.subsample_size > 0)
+
+    def generate_batch(self, rng: np.random.Generator):
+        _, entries = self.sampler.sample_entries(
+            self.batch_size, max(1, self.subsample_size), rng)
+        sequences = self.sampler.sequences(entries, rng)
+        if self.kmer > 1:
+            sequences = dna.encode_kmers(
+                sequences, # type: ignore
+                self.kmer,
+                not self.sampler.augment_ambiguous_bases) # type: ignore
+        if self.subsample_size == 0:
+            sequences = np.squeeze(sequences, axis=1)
+        sequences = self.encoder.predict(sequences, batch_size=self.encoder_batch_size, verbose=False)
+        return sequences, sequences

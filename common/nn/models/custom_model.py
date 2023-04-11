@@ -2,16 +2,19 @@ import tensorflow as tf
 from typing import cast, Generic, ParamSpec, TypeVar
 from . utils import accumulate_train_step
 
-Params = ParamSpec("Params")
+Params = TypeVar("Params")
 ReturnType = TypeVar("ReturnType")
 
 class TypedModel(tf.keras.Model, Generic[Params, ReturnType]):
     """
     A layer with type generics.
     """
-    def __call__(self, *args: Params.args, **kwargs: Params.kwargs) -> ReturnType:
-        return cast(ReturnType, super().__call__(*args, **kwargs))
-
+    def __call__(
+        self,
+        inputs: Params,
+        training: bool|None = None
+    ) -> ReturnType:
+        return cast(ReturnType, super().__call__(inputs, training=training))
 
 class CustomModel(TypedModel[Params, ReturnType], Generic[Params, ReturnType]):
 

@@ -1,7 +1,7 @@
 # import numpy as np
 import tensorflow as tf
 from settransformer import custom_layers as __settransformer_layers
-from typing import Any, cast, Generic, TypeVar, ParamSpec
+from typing import Any, Callable, cast, Generic, TypeVar, ParamSpec
 
 from . registry import CustomObject, register_custom_objects
 from . utils import tfcast
@@ -34,6 +34,7 @@ class KmerEncoder(TypedLayer[[tf.Tensor], tf.Tensor]):
         include_mask_token: bool = True,
         overlap: bool = True,
         padding: str = "VALID",
+        num_bases: int = 4,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -41,7 +42,10 @@ class KmerEncoder(TypedLayer[[tf.Tensor], tf.Tensor]):
         self.include_mask_token = include_mask_token
         self.overlap = overlap
         self.padding = padding
-        self.kernel = tf.reshape(5**tf.range(self.kmer - 1, -1, -1, dtype=tf.int32), (-1, 1, 1))
+        self.num_bases = num_bases
+        self.kernel = tf.reshape(
+            self.num_bases**tf.range(self.kmer - 1, -1, -1, dtype=tf.int32),
+            (-1, 1, 1))
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
         stride = 1 if self.overlap else self.kmer
@@ -57,7 +61,8 @@ class KmerEncoder(TypedLayer[[tf.Tensor], tf.Tensor]):
             "kmer": self.kmer,
             "include_mask_token": self.include_mask_token,
             "overlap": self.overlap,
-            "padding": self.padding
+            "padding": self.padding,
+            "num_bases": self.num_bases
         })
         return config
 
@@ -550,6 +555,34 @@ class EmbeddingWithClassToken(TypedLayer[[tf.Tensor], tf.Tensor]):
 
 
 @CustomObject
+class InjectClassToken(tf.keras.layers.Layer):
+    def __init__(self, embed_dim, **kwargs):
+        super().__init__(**kwargs)
+        self.embed_dim = embed_dim
+        self.class_token = self.add_weight(
+            shape=(1, 1, self.embed_dim),
+            initializer="glorot_normal",
+            trainable=True,
+            name="Class_Token"
+        )
+
+    def compute_mask(self, inputs, mask):
+        if mask is None:
+            return None
+        batch_size = tf.shape(inputs)[0]
+        return tf.concat((tf.ones((batch_size, 1), dtype=tf.bool), mask), axis=1)
+
+    def call(self, inputs, mask=None):
+        class_tokens = tf.tile(self.class_token, (tf.shape(inputs)[0], 1, 1))
+        return tf.concat((class_tokens, inputs), axis=1)
+
+    def get_config(self):
+        return super().get_config() | {
+            "embed_dim": self.embed_dim
+        }
+
+
+@CustomObject
 class SplitClassToken(TypedLayer[[tf.Tensor], tuple[tf.Tensor, tf.Tensor]]):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -563,6 +596,65 @@ class SplitClassToken(TypedLayer[[tf.Tensor], tuple[tf.Tensor, tf.Tensor]]):
         token = inputs[:,0,:]   # type: ignore
         others = inputs[:,1:,:] # type: ignore
         return token, others
+
+    def compute_output_shape(self, input_shape):
+        return (
+            (input_shape[0], input_shape[2]),
+            (input_shape[0], input_shape[1] - 1, input_shape[2])
+        )
+
+
+class SetMask(tf.keras.layers.Layer):
+    def __init__(
+        self,
+        embed_dim: int,
+        max_set_len: int,
+        mask_ratio: tf.Variable|float = 0.15,
+        use_keras_mask: bool = False,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.embed_dim = embed_dim
+        self.max_set_len = max_set_len
+        self.mask_ratio = mask_ratio
+        self.use_keras_mask = use_keras_mask
+        self.mask_tokens = self.add_weight(
+            shape=(1, tfcast(self.mask_ratio*self.max_set_len, tf.int32), self.embed_dim), # type: ignore
+            initializer="glorot_normal",
+            trainable=True,
+            name="Mask_Tokens"
+        )
+
+    def compute_mask(self, inputs, mask):
+        if not self.use_keras_mask:
+            return None
+        batch_size = tf.shape(inputs)[0]
+        set_len = tf.shape(inputs)[1]
+
+        m = tfcast(self.mask_ratio*tfcast(set_len, tf.float32), tf.int32)
+
+        zeros = tf.zeros((batch_size, m), dtype=tf.bool)
+        ones = tf.ones((batch_size, set_len - m), dtype=tf.bool)
+        return tf.concat((zeros, ones), axis=1)
+
+    def call(self, inputs, mask=None):
+        batch_size = tf.shape(inputs)[0]
+        set_len = tf.shape(inputs)[1]
+
+        m = tfcast(self.mask_ratio*tfcast(set_len, tf.float32), tf.int32)
+
+        masked_tokens = tf.tile(self.mask_tokens[:,:m,:], (batch_size, 1, 1))
+        unmasked_tokens = inputs[:,m:,:]
+
+        return m, tf.concat((masked_tokens, unmasked_tokens), axis=1)
+
+    def get_config(self):
+        return super().get_config() | {
+            "embed_dim": self.embed_dim,
+            "max_set_len": self.max_set_len,
+            "mask_ratio": self.mask_ratio,
+            "use_keras_mask": self.use_keras_mask
+        }
 
 # Set Generation -----------------------------------------------------------------------------------
 
@@ -620,13 +712,21 @@ class SampleSet(TypedLayer[[tf.Tensor], tf.Tensor]):
 # Utility Layers -----------------------------------------------------------------------------------
 
 class MaskDebug(TypedLayer[[tf.Tensor], tf.Tensor]):
-    def __init__(self, **kwargs):
+    def __init__(self, mask_callback: Callable|None = None, **kwargs):
         super().__init__(**kwargs)
+        self.mask_callback = mask_callback
         self.supports_masking = True
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
         return inputs + 0 # type: ignore
 
     def compute_mask(self, inputs, mask=None):
-        tf.print("\n\nMask:", mask, "\n\n")
+        if self.mask_callback is None:
+            if mask is None:
+                tf.print("No mask")
+                return mask
+            tf.print("Mask Shape", tf.shape(mask))
+            tf.print("Mask:", mask)
+            return mask
+        self.mask_callback(inputs, mask)
         return mask
