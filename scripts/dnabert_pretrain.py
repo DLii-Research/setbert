@@ -15,6 +15,7 @@ def define_arguments(cli):
     # General config
     cli.use_wandb()
     cli.use_strategy()
+    cli.use_rng()
 
     # Dataset path
     cli.argument("--dataset-path", type=str, required=True)
@@ -29,7 +30,6 @@ def define_arguments(cli):
 
     # Training settings
     cli.use_training(epochs=2000, batch_size=2000)
-    cli.argument("--seed", type=int, default=None)
     cli.argument("--batches-per-epoch", type=int, default=100)
     cli.argument("--val-batches-per-epoch", type=int, default=16)
     cli.argument("--data-augment", type=str_to_bool, default=True)
@@ -40,7 +40,7 @@ def define_arguments(cli):
     cli.argument("--optimizer", type=str, choices=["adam", "nadam"], default="adam")
     cli.argument("--lr", type=float, default=4e-4)
     cli.argument("--init-lr", type=float, default=0.0)
-    cli.argument("--warmup-steps", type=int, default=10000)
+    cli.argument("--warmup-steps", type=int, default=None)
 
     # Logging
     cli.argument("--save-to", type=str, default=None)
