@@ -27,6 +27,7 @@ def define_arguments(cli: tfs.CliArgumentFactory):
     cli.argument("output_path", help="The path where the files will be written")
     cli.argument("--test-split", type=float, default=0.0, help="The factor of the number of samples to use for testing")
     cli.argument("--num-splits", type=int, default=1, help=f"The number of data splits to create")
+    cli.argument("--min-length", type=int, default=0, help="The minimum length of a sequence to include")
     cli.argument("--force-download", default=False, action="store_true", help="Force re-downloading of data")
     output_types = cli.parser.add_argument_group("Output Formats")
     output_types.add_argument("--output-db", default=False, action="store_true", help="Output FASTA DBs")
@@ -56,6 +57,7 @@ def dataset_file_names(datasets: list[FastaDataset]) -> tuple[str, str]:
 
 
 def output_fasta(
+    config,
     datasets: list[FastaDataset],
     train_labels: set[str],
     hierarchy: taxonomy.TaxonomyHierarchy,
@@ -73,6 +75,8 @@ def output_fasta(
     sequences = chain(*[dataset.sequences() for dataset in datasets])
     taxonomies = chain(*[dataset.taxonomies() for dataset in datasets])
     for sequence, tax in tqdm(fasta.entries_with_taxonomy(sequences, taxonomies), leave=False, desc="Writing Fasta/Taxonomy entries"):
+        if len(sequence.sequence) < config.min_length:
+            continue
         fasta_out, tax_out = (train_fasta, train_tax)
         if tax.label not in train_labels:
             tax = hierarchy.reduce_entry(tax)
@@ -85,6 +89,7 @@ def output_fasta(
 
 
 def output_db(
+    config,
     datasets: list[FastaDataset],
     train_labels: set[str],
     hierarchy: taxonomy.TaxonomyHierarchy,
@@ -100,6 +105,8 @@ def output_db(
     sequences = chain(*[dataset.sequences() for dataset in datasets])
     taxonomies = chain(*[dataset.taxonomies() for dataset in datasets])
     for sequence, tax in tqdm(fasta.entries_with_taxonomy(sequences, taxonomies), leave=False, desc="Writing DB entries"):
+        if len(sequence.sequence) < config.min_length:
+            continue
         fasta_out, tax_out = (train_fasta, train_tax)
         if tax.label not in train_labels:
             tax = hierarchy.reduce_entry(tax)
@@ -154,6 +161,7 @@ def main():
 
         if config.output_fasta:
             fasta_files += output_fasta(
+                config,
                 datasets,
                 train_labels,
                 hierarchy,
@@ -162,6 +170,7 @@ def main():
 
         if config.output_db:
             output_db(
+                config,
                 datasets,
                 train_labels,
                 hierarchy,

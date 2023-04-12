@@ -6,12 +6,14 @@ DB files.
 """
 from dnadb import dna, fasta, fastq
 from dnadb.utils import compress
+from itertools import chain
 import numpy as np
 from pathlib import Path
 import re
 import sys
 import tf_utilities.scripting as tfs
 from tqdm.auto import tqdm, trange
+from typing import Iterable, TypeVar
 
 import bootstrap
 
@@ -21,6 +23,7 @@ def define_arguments(cli: tfs.CliArgumentFactory):
     cli.argument("data_files", nargs='+', help="Paths to FASTA/FASTQ files")
     cli.argument("--test-split", type=float, default=0.2, help="The factor of the number of samples to use for testing")
     cli.argument("--num-splits", type=int, default=1, help=f"The number of data splits to create")
+    cli.argument("--min-length", type=int, default=0, help="The minimum length of a sequence to include")
     processing = cli.parser.add_argument_group("Processing Steps")
     processing.add_argument("--clean-sequences", default=False, action="store_true", help="Clean the sequences by removing any unknown characters")
     output_types = cli.parser.add_argument_group("Output Formats")
@@ -42,10 +45,10 @@ def output_fasta_file(
         test_path = output_path / "test"
         train_path = output_path / "train"
         with open(test_path / filename, 'w') as f:
-            fasta.write(f, tqdm(entries[:split_index], leave=False, desc="Writing test FASTA"))
+            fasta.write(f, tqdm(entries[:split_index], leave=False, desc=f"Writing {filename}"))
             files.append(Path(f.name))
     with open(train_path / filename, 'w') as f:
-        fasta.write(f, tqdm(entries[split_index:], leave=False, desc="Writing train FASTA"))
+        fasta.write(f, tqdm(entries[split_index:], leave=False, desc=f"Writing {filename}"))
         files.append(Path(f.name))
     return files
 
@@ -63,10 +66,10 @@ def output_fastq_file(
         test_path = output_path / "test"
         train_path = output_path / "train"
         with open(test_path / filename, 'w') as f:
-            fastq.write(f, tqdm(entries[:split_index], leave=False, desc="Writing test FASTQ"))
+            fastq.write(f, tqdm(entries[:split_index], leave=False, desc=f"Writing {filename}"))
             files.append(Path(f.name))
     with open(train_path / filename, 'w') as f:
-        fastq.write(f, tqdm(entries[split_index:], leave=False, desc="Writing train FASTQ"))
+        fastq.write(f, tqdm(entries[split_index:], leave=False, desc=f"Writing {filename}"))
         files.append(Path(f.name))
     return files
 
@@ -83,9 +86,9 @@ def output_fasta_db(
         test_path = output_path / "test"
         train_path = output_path / "train"
         db = fasta.FastaDbFactory(test_path / filename)
-        db.write_entries(tqdm(entries[:split_index], leave=False, desc="Writing test FASTA DB"))
+        db.write_entries(tqdm(entries[:split_index], leave=False, desc=f"Writing {db.path.name}"))
     db = fasta.FastaDbFactory(train_path / filename)
-    db.write_entries(tqdm(entries[split_index:], leave=False, desc="Writing train FASTA DB"))
+    db.write_entries(tqdm(entries[split_index:], leave=False, desc=f"Writing {db.path.name}"))
 
 
 def output_fastq_db(
@@ -100,9 +103,25 @@ def output_fastq_db(
         test_path = output_path / "test"
         train_path = output_path / "train"
         db = fastq.FastqDbFactory(test_path / filename)
-        db.write_entries(tqdm(entries[:split_index], leave=False, desc="Writing test FASTQ DB"))
+        db.write_entries(tqdm(entries[:split_index], leave=False, desc=f"Writing {db.path.name}"))
     db = fastq.FastqDbFactory(train_path / filename)
-    db.write_entries(tqdm(entries[split_index:], leave=False, desc="Writing train FASTQ DB"))
+    db.write_entries(tqdm(entries[split_index:], leave=False, desc=f"Writing {db.path.name}"))
+
+
+T = TypeVar("T", bound=fasta.FastaEntry|fastq.FastqEntry)
+def read_entries(filename: str, entries: Iterable[T], min_length: int, clean_sequences: bool):
+    result: list[T] = []
+    dropped_entries = 0
+    total_entries = 0
+    desc = f"Reading {'+ Cleaning ' if clean_sequences else ''}{filename}"
+    for total_entries, entry in tqdm(enumerate(entries, start=1), desc=desc):
+        if clean_sequences:
+            entry.sequence = re.sub(f"[^{dna.ALL_BASES}]", '', entry.sequence)
+        if len(entry.sequence) < min_length:
+            dropped_entries += 1
+            continue
+        result.append(entry)
+    return result, dropped_entries, total_entries
 
 
 def process_fasta_files(
@@ -112,11 +131,16 @@ def process_fasta_files(
     rng: np.random.Generator
 ):
     files: list[Path] = []
+    dropped_sequences: list[int] = []
+    total_sequences: list[int] = []
     for fasta_file in tqdm(fasta_files, desc="Procesing FASTA"):
-        entries = list(tqdm(fasta.entries(fasta_file), desc=f"Reading {fasta_file.name}"))
-        if config.clean_sequences:
-            for entry in tqdm(entries, desc="Cleaning sequences"):
-                entry.sequence = re.sub(f"[^{dna.ALL_BASES}]", '', entry.sequence)
+        entries, num_dropped, num_sequences = read_entries(
+            fasta_file.name,
+            fasta.entries(fasta_file),
+            config.min_length,
+            config.clean_sequences)
+        dropped_sequences.append(num_dropped)
+        total_sequences.append(num_sequences)
         split_index = int(len(entries) * config.test_split)
         filename = fasta_file.name.rstrip('.gz')
         for i in trange(config.num_splits, desc="Split"):
@@ -126,7 +150,7 @@ def process_fasta_files(
                 files += output_fasta_file(config, filename, entries, split_index, path)
             if config.output_db:
                 output_fasta_db(config, filename, entries, split_index, path)
-    return files
+    return files, dropped_sequences, total_sequences
 
 
 def process_fastq_files(
@@ -136,7 +160,16 @@ def process_fastq_files(
     rng: np.random.Generator
 ):
     files: list[Path] = []
+    dropped_sequences: list[int] = []
+    total_sequences: list[int] = []
     for fastq_file in tqdm(fastq_files, desc="Procesing FASTQ"):
+        entries, num_dropped, num_sequences = read_entries(
+            fastq_file.name,
+            fastq.entries(fastq_file),
+            config.min_length,
+            clean_sequences=False)
+        dropped_sequences.append(num_dropped)
+        total_sequences.append(num_sequences)
         entries = list(tqdm(fastq.entries(fastq_file), desc=f"Reading {fastq_file.name}"))
         split_index = int(len(entries) * config.test_split)
         filename = fastq_file.name.rstrip('.gz')
@@ -147,7 +180,7 @@ def process_fastq_files(
                 files += output_fastq_file(config, filename, entries, split_index, path)
             if config.output_db:
                 output_fastq_db(config, filename, entries, split_index, path)
-    return files
+    return files, dropped_sequences, total_sequences
 
 
 def main():
@@ -194,15 +227,37 @@ def main():
         train_path.mkdir(parents=True, exist_ok=True)
 
     rng = tfs.rng()
-    files_written: list[Path] = []
+
+    processed_file_chain: chain[tuple[Path, int, int]] = chain()
     if len(fasta_files) > 0:
-        files_written += process_fasta_files(config, fasta_files, output_path, rng)
+        processed_file_chain = chain(
+            processed_file_chain,
+            zip(*process_fasta_files(config, fasta_files, output_path, rng)))
+
     if len(fastq_files) > 0:
-        files_written += process_fastq_files(config, fastq_files, output_path, rng)
+        processed_file_chain = chain(
+            processed_file_chain,
+            zip(*process_fastq_files(config, fastq_files, output_path, rng)))
+
+    processed = list(processed_file_chain)
 
     if config.compress:
-        for file in tqdm(files_written, desc="Compressing files"):
+        for file, _, _ in tqdm(processed, desc="Compressing files"):
             compress(file)
+
+    print("Sequence Count Summary:")
+    total_dropped = 0
+    total_kept = 0
+    for file, dropped, total in processed:
+        total_dropped += dropped
+        total_kept += total - dropped
+        print(
+            f"{file.name}:",
+            f"Kept: {total - dropped:,}/{total:,} ({(total - dropped)/total:.3%});", # type: ignore
+            f"Dropped: {dropped:,}/{total:,} ({dropped/total:.3%})")
+    print(
+        f"Total Kept: {total_kept:,}/{total_kept + total_dropped:,} ({total_kept / (total_dropped + total_kept):.3%});",
+        f"Total Dropped: {total_dropped:,}/{total_kept + total_dropped:,} ({total_dropped/(total_kept + total_dropped):.3%})")
 
 
 if __name__ == "__main__":

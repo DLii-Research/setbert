@@ -5,11 +5,12 @@ import sys
 import tensorflow as tf
 import tf_utilities.scripting as tfs
 from tf_utilities.utils import str_to_bool
-from common.dataset import Dataset
-from common.nn.callbacks import LearningRateStepScheduler
-from common.nn.data_generators import FastaSequenceGenerator
-from common.nn.models import dnabert, load_model
-from common.nn.utils import optimizer
+
+from deepdna.data.dataset import Dataset
+from deepdna.nn.callbacks import LearningRateStepScheduler
+from deepdna.nn.data_generators import FastaSequenceGenerator
+from deepdna.nn.models import dnabert, load_model
+from deepdna.nn.utils import optimizer
 
 def define_arguments(cli):
     # General config
