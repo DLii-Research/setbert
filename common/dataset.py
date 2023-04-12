@@ -1,6 +1,5 @@
 import enum
 from pathlib import Path
-import re
 from typing import Callable, Generator, Iterable
 
 class Split(enum.Flag):
@@ -41,13 +40,11 @@ class Dataset:
         """
         Find all files in a directory that pass the given test.
         """
-        # Ensure the numeric prefix is treated as a number and not a string during sorting.
-        numeric_prefix = lambda x: (int(re.match(r"\d+",x.name)[0]), x.name) # type: ignore
         if split & Split.Train:
-            yield from sorted((f for f in self.train_path.iterdir() if test(f)), key=numeric_prefix)
+            yield from sorted((f for f in self.train_path.iterdir() if test(f)))
         if split & Split.Test:
             assert self.test_path is not None, "Dataset does not have a test split."
-            yield from sorted((f for f in self.test_path.iterdir() if test(f)), key=numeric_prefix)
+            yield from sorted((f for f in self.test_path.iterdir() if test(f)))
 
     def find_with_suffix(self, suffixes: Iterable[str], split: Split) -> Generator[Path, None, None]:
         """
@@ -72,10 +69,10 @@ class Dataset:
         """
         Find all taxonomy files in a directory.
         """
-        yield from self.find_with_suffix(["_taxonomy.tsv", "_taxonomy.tsv.gz"], split)
+        yield from self.find_with_suffix([".tax.tsv", ".tax.tsv.gz"], split)
 
     def taxonomy_dbs(self, split: Split) -> Generator[Path, None, None]:
         """
         Find all taxonomy db files in a directory.
         """
-        yield from self.find_with_suffix(["_taxonomy.tsv.db"], split)
+        yield from self.find_with_suffix([".tax.tsv.db"], split)

@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
-# Load the given datasets and split them into training/testing sets.
-# This script outputs a raw fasta file for training andtesting with a
-# corresponding taxonomy tsv file.
+"""
+Prepare a public taxonomic dataset such as Greengenes or Silva. This script will
+download the dataset automatically and create the appropriate files for use in
+Qiime as well as our own deep learning models.
+"""
 from dnadb.datasets import get_datasets
-from dnadb.datasets.dataset import Dataset, InterfacesWithFasta, InterfacesWithTaxonomy
+from dnadb.datasets.dataset import InterfacesWithFasta, InterfacesWithTaxonomy, VersionedDataset
 from dnadb import fasta, taxonomy
 from dnadb.utils import compress
+from itertools import chain
 import numpy as np
 from pathlib import Path
 import sys
 import tf_utilities.scripting as tfs
 from tqdm.auto import tqdm, trange
-from typing import cast, Generator, Iterable, TypeVar
+from typing import cast, TextIO
 
 import bootstrap
 
 # Type Definition
-class FastaDataset(InterfacesWithFasta, InterfacesWithTaxonomy, Dataset):
-    pass
+class FastaDataset(InterfacesWithFasta, InterfacesWithTaxonomy, VersionedDataset):
+    ...
 
 def define_arguments(cli: tfs.CliArgumentFactory):
     cli.use_rng()
     cli.argument("output_path", help="The path where the files will be written")
-    cli.argument("--test-split", type=float, default=0.2, help="The factor of the number of samples to use for testing")
+    cli.argument("--test-split", type=float, default=0.0, help="The factor of the number of samples to use for testing")
     cli.argument("--num-splits", type=int, default=1, help=f"The number of data splits to create")
     cli.argument("--force-download", default=False, action="store_true", help="Force re-downloading of data")
     output_types = cli.parser.add_argument_group("Output Formats")
@@ -39,80 +42,74 @@ def define_arguments(cli: tfs.CliArgumentFactory):
             metavar=f"{dataset.NAME.upper()}_VERSION",
             help=f"Use the {dataset.NAME} dataset")
 
-T = TypeVar("T")
-def merged_generator(generators: Iterable[Generator[T, None, None]]) -> Generator[T, None, None]:
-    for generator in generators:
-        yield from generator
 
 def load_train_labels(config, datasets: list[FastaDataset], rng: np.random.Generator):
-    taxonomies = merged_generator([dataset.taxonomies() for dataset in datasets])
+    taxonomies = chain(*[dataset.taxonomies() for dataset in datasets])
     labels = list(tqdm(taxonomy.unique_labels(taxonomies), desc="Loading unique labels", leave=False))
     rng.shuffle(labels)
     return set(labels[int(config.test_split*len(labels)):])
 
+
+def dataset_file_names(datasets: list[FastaDataset]) -> tuple[str, str]:
+    name = "-".join([f"{d.name}_{d.version}" for d in datasets])
+    return name + ".fasta", name + ".tax.tsv"
+
+
 def output_fasta(
-    config,
     datasets: list[FastaDataset],
     train_labels: set[str],
     hierarchy: taxonomy.TaxonomyHierarchy,
     train_path: Path,
-    test_path: Path,
-    split_index: int
-):
-    train_path.mkdir(parents=True, exist_ok=True)
-    test_path.mkdir(parents=True, exist_ok=True)
-    train_fasta_path = test_fasta_path = train_path / f"{split_index}.fasta"
-    train_tax_path = test_tax_path = train_path / f"{split_index}_taxonomy.fasta"
-    train_fasta = test_fasta = open(train_fasta_path, 'w')
-    train_tax = test_tax = open(train_tax_path, 'w')
-    files_written = [train_fasta_path, train_tax_path]
-    if config.test_split > 0.0:
-        test_fasta_path = test_path / f"{split_index}.fasta"
-        test_tax_path = test_path / f"{split_index}_taxonomy.tsv"
-        test_fasta = open(test_fasta_path, 'w')
-        test_tax = open(test_tax_path, 'w')
-        files_written += [test_fasta_path, test_tax_path]
-    sequences = merged_generator([dataset.sequences() for dataset in datasets])
-    taxonomies = merged_generator([dataset.taxonomies() for dataset in datasets])
-    for sequence, tax in tqdm(fasta.entries_with_taxonomy(sequences, taxonomies), leave=False, desc="Writing FASTA+taxonomy entries"):
-        if tax.label in train_labels:
-            train_fasta.write(str(sequence) + '\n')
-            train_tax.write(str(tax) + '\n')
-            continue
-        tax = hierarchy.reduce_entry(tax)
-        test_fasta.write(str(sequence) + '\n')
-        test_tax.write(str(tax) + '\n')
-    return files_written
+    test_path: Path|None
+) -> list[Path]:
+    sequences_file_name, taxonomy_file_name = dataset_file_names(datasets)
+    train_fasta = open(train_path / sequences_file_name, 'w')
+    train_tax = open(train_path / taxonomy_file_name, 'w')
+    files: list[TextIO] = [train_fasta, train_tax]
+    if test_path is not None:
+        test_fasta = open(test_path / sequences_file_name, 'w')
+        test_tax = open(test_path / taxonomy_file_name, 'w')
+        files += [test_fasta, test_tax]
+    sequences = chain(*[dataset.sequences() for dataset in datasets])
+    taxonomies = chain(*[dataset.taxonomies() for dataset in datasets])
+    for sequence, tax in tqdm(fasta.entries_with_taxonomy(sequences, taxonomies), leave=False, desc="Writing Fasta/Taxonomy entries"):
+        fasta_out, tax_out = (train_fasta, train_tax)
+        if tax.label not in train_labels:
+            tax = hierarchy.reduce_entry(tax)
+            fasta_out, tax_out = (test_fasta, test_tax) # type: ignore
+        fasta_out.write(str(sequence) + '\n')
+        tax_out.write(str(tax) + '\n')
+    for file in files:
+        file.close()
+    return [Path(file.name) for file in files]
+
 
 def output_db(
-    config,
     datasets: list[FastaDataset],
     train_labels: set[str],
     hierarchy: taxonomy.TaxonomyHierarchy,
     train_path: Path,
-    test_path: Path,
-    split_index: int
+    test_path: Path|None
 ):
-    train_path.mkdir(parents=True, exist_ok=True)
-    test_path.mkdir(parents=True, exist_ok=True)
-    train_fasta = test_fasta = fasta.FastaDbFactory(train_path / f"{split_index}.fasta.db")
-    train_tax = test_tax = taxonomy.TaxonomyDbFactory(train_path / f"{split_index}_taxonomy.tsv.db")
-    if config.test_split > 0.0:
-        test_fasta = fasta.FastaDbFactory(test_path / f"{split_index}.fasta.db")
-        test_tax = taxonomy.TaxonomyDbFactory(test_path / f"{split_index}_taxonomy.tsv.db")
-    sequences = merged_generator([dataset.sequences() for dataset in datasets])
-    taxonomies = merged_generator([dataset.taxonomies() for dataset in datasets])
+    sequences_file_name, taxonomy_file_name = dataset_file_names(datasets)
+    train_fasta = fasta.FastaDbFactory(train_path / sequences_file_name)
+    train_tax = taxonomy.TaxonomyDbFactory(train_path / taxonomy_file_name)
+    if test_path is not None:
+        test_fasta = fasta.FastaDbFactory(test_path / sequences_file_name)
+        test_tax = taxonomy.TaxonomyDbFactory(test_path / taxonomy_file_name)
+    sequences = chain(*[dataset.sequences() for dataset in datasets])
+    taxonomies = chain(*[dataset.taxonomies() for dataset in datasets])
     for sequence, tax in tqdm(fasta.entries_with_taxonomy(sequences, taxonomies), leave=False, desc="Writing DB entries"):
-        if tax.label in train_labels:
-            train_fasta.write_entry(sequence)
-            train_tax.write_entry(tax)
-            continue
-        tax = hierarchy.reduce_entry(tax)
-        test_fasta.write_entry(sequence)
-        test_tax.write_entry(tax)
+        fasta_out, tax_out = (train_fasta, train_tax)
+        if tax.label not in train_labels:
+            tax = hierarchy.reduce_entry(tax)
+            fasta_out, tax_out = (test_fasta, test_tax) # type: ignore
+        fasta_out.write_entry(sequence)
+        tax_out.write_entry(tax)
+
 
 def main():
-    config = tfs.init(define_arguments, use_wandb=False, use_tensorflow=False)
+    config = tfs.init(define_arguments, use_wandb=False)
 
     output_path = Path(config.output_path)
 
@@ -130,13 +127,11 @@ def main():
         print(f"The output directory: `{output_path.parent}` does not exist.")
         return 1
 
-    train_path = test_path = output_path
-    if config.test_split != 0.0:
-        train_path = train_path / "train"
-        test_path = test_path / "test"
+    if config.num_splits > 1 and config.test_split == 0.0:
+        print("Num splits can only be used when a test split > 0.0 is supplied.")
+        return 1
 
     rng = tfs.rng()
-
     fasta_files: list[Path] = []
 
     for i in trange(config.num_splits, desc="Dataset splits"):
@@ -147,25 +142,31 @@ def main():
         # Create the taxonomy hierarchy for training labels
         hierarchy = taxonomy.TaxonomyHierarchy.from_labels(train_labels, depth=6)
 
+        # Create the directories
+        train_path = output_path
+        test_path = None
+        if config.test_split > 0.0:
+            train_path = output_path / str(i)
+            test_path = train_path / "test"
+            train_path = train_path / "train"
+            test_path.mkdir(parents=True, exist_ok=True)
+        train_path.mkdir(parents=True, exist_ok=True)
+
         if config.output_fasta:
             fasta_files += output_fasta(
-                config,
                 datasets,
                 train_labels,
                 hierarchy,
                 train_path,
-                test_path,
-                i)
+                test_path)
 
         if config.output_db:
             output_db(
-                config,
                 datasets,
                 train_labels,
                 hierarchy,
                 train_path,
-                test_path,
-                i)
+                test_path)
 
         if config.compress and len(fasta_files):
             for file in tqdm(fasta_files, description="Compressing"):
