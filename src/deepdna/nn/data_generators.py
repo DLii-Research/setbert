@@ -1,5 +1,6 @@
-from dnadb import dna, fasta, taxonomy
+from dnadb import dna, fasta, fastq, taxonomy
 import numpy as np
+import numpy.typing as npt
 import tensorflow as tf
 from typing import cast, Iterable
 
@@ -52,10 +53,10 @@ class BatchGenerator(tf.keras.utils.Sequence):
         return self.batches_per_epoch
 
 
-class FastaSampler:
+class SequenceSampler:
     def __init__(
         self,
-        samples: Iterable[fasta.FastaDb],
+        samples: Iterable[fasta.FastaDb|fastq.FastqDb],
         sequence_length: int,
         augment_slide: bool = True,
         augment_ambiguous_bases: bool = True
@@ -97,16 +98,16 @@ class FastaSampler:
             sequences = dna.replace_ambiguous_encoded_bases(sequences, rng)
         return sequences.astype(np.int32)
 
-    def sample_entries(self, num_samples: int, subsample_size: int, rng: np.random.Generator):
+    def random_entries(self, num_samples: int, subsample_size: int, rng: np.random.Generator):
         """
-        Sample random sequence entries from the FASTAs.
+        Draw samples at random and return random subsamples from each one.
         """
         # Draw some random samples
         sample_indices = rng.choice(len(self.samples), num_samples)
         samples = tuple(self.samples[i] for i in sample_indices)
 
         # Draw random sequence indices for each sample
-        sequence_offsets = rng.uniform(size=(num_samples, subsample_size))
+        sequence_offsets = rng.uniform(size=(len(sample_indices), subsample_size))
         sequence_indices = (sequence_offsets*[[len(s)] for s in samples]).astype(np.int32)
 
         fasta_entries = []
@@ -115,13 +116,13 @@ class FastaSampler:
         return sample_indices, fasta_entries
 
 
-class FastaSequenceGenerator(BatchGenerator):
+class SequenceGenerator(BatchGenerator):
     """
     Generate sequences from given FASTA files.
     """
     def __init__(
         self,
-        samples: Iterable[fasta.FastaDb],
+        samples: Iterable[fasta.FastaDb|fastq.FastqDb],
         sequence_length: int = 150,
         kmer: int = 1,
         batch_size: int = 32,
@@ -134,7 +135,15 @@ class FastaSequenceGenerator(BatchGenerator):
         rng: np.random.Generator = np.random.default_rng()
     ):
         super().__init__(batch_size, batches_per_epoch, rng)
-        self.sampler = FastaSampler(
+        if subsample_size > 0:
+            to_keep: list[fasta.FastaDb|fastq.FastqDb] = []
+            for sample in samples:
+                if len(sample) < subsample_size:
+                    print(f"WARNING: Skipping sample {sample.path.name} because it has too few sequences ({len(sample)} < {subsample_size})")
+                    continue
+                to_keep.append(sample)
+            samples = to_keep
+        self.sampler = SequenceSampler(
             samples,
             sequence_length,
             augment_slide=augment_slide,
@@ -145,7 +154,7 @@ class FastaSequenceGenerator(BatchGenerator):
         self.use_kmer_labels = use_kmer_labels
 
     def generate_batch(self, rng: np.random.Generator):
-        _, entries = self.sampler.sample_entries(
+        _, entries = self.sampler.random_entries(
             self.batch_size, max(1, self.subsample_size), rng)
         sequences = self.sampler.sequences(entries, rng)
         if self.subsample_size == 0:
@@ -166,7 +175,7 @@ class FastaSequenceGenerator(BatchGenerator):
         return self.sampler.sequence_length
 
 
-class FastaSampleGenerator(BatchGenerator):
+class SampleGenerator(BatchGenerator):
     """
     Generate sequences from given FASTA files with the sample FASTA as the label.
     """
@@ -185,7 +194,7 @@ class FastaSampleGenerator(BatchGenerator):
         rng: np.random.Generator = np.random.default_rng()
     ):
         super().__init__(batch_size, batches_per_epoch, rng)
-        self.sampler = FastaSampler(
+        self.sampler = SequenceSampler(
             samples,
             sequence_length,
             augment_slide=augment_slide,
@@ -196,7 +205,7 @@ class FastaSampleGenerator(BatchGenerator):
         self.use_kmer_labels = use_kmer_labels
 
     def generate_batch(self, rng: np.random.Generator):
-        sample_indices, entries = self.sampler.sample_entries(
+        sample_indices, entries = self.sampler.random_entries(
             self.batch_size, max(1, self.subsample_size), rng)
         sequences = self.sampler.sequences(entries, rng)
         if self.subsample_size == 0:
@@ -234,7 +243,7 @@ class FastaTaxonomyGenerator(BatchGenerator):
     ):
         super().__init__(batch_size, batches_per_epoch, rng)
         fasta_dbs, taxonomy_dbs = zip(*samples)
-        self.sampler = FastaSampler(
+        self.sampler = SequenceSampler(
             cast(tuple[fasta.FastaDb], fasta_dbs),
             sequence_length,
             augment_slide=augment_slide,
@@ -246,7 +255,7 @@ class FastaTaxonomyGenerator(BatchGenerator):
         self.hierarchy.depth = taxonomy_depth
 
     def generate_batch(self, rng: np.random.Generator):
-        sample_indices, entries = self.sampler.sample_entries(
+        sample_indices, entries = self.sampler.random_entries(
             self.batch_size, max(1, self.subsample_size), rng)
         sequences = self.sampler.sequences(entries, rng)
         labels = np.full((*sequences.shape[:-1], self.hierarchy.depth),  -1,  dtype=np.int32)
@@ -272,10 +281,10 @@ class FastaTaxonomyGenerator(BatchGenerator):
         return self.sampler.sequence_length
 
 
-class FastaSequenceEmbeddingGenerator(FastaSequenceGenerator):
+class SequenceEmbeddingGenerator(SequenceGenerator):
     def __init__(
         self,
-        samples: Iterable[fasta.FastaDb],
+        samples: Iterable[fasta.FastaDb|fastq.FastqDb],
         dnabert_base: dnabert.DnaBertModel,
         batch_size: int = 16,
         batches_per_epoch: int = 100,
@@ -300,7 +309,7 @@ class FastaSequenceEmbeddingGenerator(FastaSequenceGenerator):
         self.encoder = dnabert.DnaBertEncoderModel(dnabert_base, subsamples=self.subsample_size > 0)
 
     def generate_batch(self, rng: np.random.Generator):
-        _, entries = self.sampler.sample_entries(
+        _, entries = self.sampler.random_entries(
             self.batch_size, max(1, self.subsample_size), rng)
         sequences = self.sampler.sequences(entries, rng)
         if self.kmer > 1:
