@@ -1,5 +1,5 @@
-import bootstrap
-from dnadb import fasta
+from dnadb import fasta, fastq
+from itertools import chain
 from pathlib import Path
 import sys
 import tf_utilities.scripting as tfs
@@ -8,8 +8,9 @@ from tf_utilities.utils import str_to_bool
 import bootstrap
 
 from deepdna.data.dataset import Dataset
+from deepdna.nn import losses
 from deepdna.nn.callbacks import LearningRateStepScheduler
-from deepdna.nn.data_generators import FastaSequenceEmbeddingGenerator
+from deepdna.nn.data_generators import SequenceEmbeddingGenerator
 from deepdna.nn.models import dnabert, setbert, load_model
 from deepdna.nn.utils import optimizer
 
@@ -23,7 +24,7 @@ def define_arguments(cli: tfs.CliArgumentFactory):
     cli.artifact("--dnabert")
 
     # Dataset path
-    cli.argument("--dataset-path", type=str, required=True)
+    cli.argument("dataset_paths", type=str, nargs='+')
 
     # Architecture Settings
     cli.argument("--subsample-size", type=int, default=1000)
@@ -42,6 +43,7 @@ def define_arguments(cli: tfs.CliArgumentFactory):
     cli.argument("--lr", type=float, default=4e-4)
     cli.argument("--init-lr", type=float, default=0.0)
     cli.argument("--warmup-steps", type=int, default=None)
+    cli.argument("--loss-fn", choices=["chamfer", "setloss"], default="chamfer")
 
     # Logging
     cli.argument("--save-to", type=str, default=None)
@@ -56,24 +58,33 @@ def load_pretrained_dnabert_model(config) -> dnabert.DnaBertModel:
 def load_datasets(
     config,
     dnabert_base: dnabert.DnaBertModel
-) -> tuple[FastaSequenceEmbeddingGenerator, FastaSequenceEmbeddingGenerator|None]:
-    dataset = Dataset(config.dataset_path)
+) -> tuple[SequenceEmbeddingGenerator, SequenceEmbeddingGenerator|None]:
+
+    datasets = [Dataset(path) for path in config.dataset_paths]
+    test_datasets = [d for d in datasets if d.has_split(Dataset.Split.Test)]
 
     generator_args = dict(
         dnabert_base = dnabert_base,
         batch_size = config.batch_size,
         subsample_size = config.subsample_size,
     )
-    train = FastaSequenceEmbeddingGenerator(
-        map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Train)),
+
+    train = SequenceEmbeddingGenerator(
+        chain(
+            chain(*(map(fasta.FastaDb, d.fasta_dbs(Dataset.Split.Train)) for d in datasets)),
+            chain(*(map(fastq.FastqDb, d.fastq_dbs(Dataset.Split.Train)) for d in datasets))),
         batches_per_epoch=config.batches_per_epoch,
         rng = tfs.rng(),
         **generator_args
     )
     validation = None
-    if dataset.has_split(Dataset.Split.Test):
-        validation = FastaSequenceEmbeddingGenerator(
-            map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Test)),
+    if len(test_datasets):
+        validation = SequenceEmbeddingGenerator(
+            chain(
+                chain(*(map(fasta.FastaDb, d.fasta_dbs(Dataset.Split.Test))
+                    for d in test_datasets if d.has_split(Dataset.Split.Test))),
+                chain(*(map(fastq.FastqDb, d.fastq_dbs(Dataset.Split.Test))
+                    for d in test_datasets if d.has_split(Dataset.Split.Test)))),
             batches_per_epoch=config.val_batches_per_epoch,
             rng = tfs.rng(),
             **generator_args
@@ -93,8 +104,17 @@ def create_model(config):
         base=base,
         mask_ratio=config.mask_ratio)
 
+    match config.loss_fn:
+        case "chamfer":
+            loss_fn = losses.chamfer_distance
+        case "setloss":
+            loss_fn = losses.SetLoss()
+        case _:
+            raise ValueError(f"Unknown loss function: {config.loss_fn}")
+
     model.compile(
         optimizer=optimizer(config.optimizer, learning_rate=config.lr),
+        loss=loss_fn,
         run_eagerly=config.run_eagerly
     )
     return model
@@ -168,7 +188,7 @@ def main(argv):
     model_path = None
     if tfs.is_resumed():
         print("Restoring previous model...")
-        raise Exception("Cannot currently resume SETBERT runs.")
+        raise Exception("Cannot currently resume SetBERT runs.")
         model_path = tfs.restore_dir(config.save_to)
 
     print(config)

@@ -14,7 +14,7 @@ class Dataset:
         """
         A wrapper for DNA datasets.
         """
-        self.path = Path(path)
+        self.path = Path(path).absolute()
         if (self.path / "train").exists():
             self.train_path = self.path / "train"
         else:
@@ -43,7 +43,7 @@ class Dataset:
         if split & Split.Train:
             yield from sorted((f for f in self.train_path.iterdir() if test(f)))
         if split & Split.Test:
-            assert self.test_path is not None, "Dataset does not have a test split."
+            assert self.test_path is not None, f"Dataset `{self.path}` does not have a test split."
             yield from sorted((f for f in self.test_path.iterdir() if test(f)))
 
     def find_with_suffix(self, suffixes: Iterable[str], split: Split) -> Generator[Path, None, None]:
@@ -64,6 +64,18 @@ class Dataset:
         Find all FASTA db files in a directory.
         """
         yield from self.find_with_suffix([".fasta.db"], split)
+
+    def fastqs(self, split: Split) -> Generator[Path, None, None]:
+        """
+        Find all FASTQ files in a directory.
+        """
+        yield from self.find_with_suffix([".fastq", ".fastq.gz"], split)
+
+    def fastq_dbs(self, split: Split) -> Generator[Path, None, None]:
+        """
+        Find all FASTQ db files in a directory.
+        """
+        yield from self.find_with_suffix([".fastq.db"], split)
 
     def taxonomies(self, split: Split) -> Generator[Path, None, None]:
         """

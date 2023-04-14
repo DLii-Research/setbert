@@ -1,10 +1,9 @@
 import settransformer as st
 import tensorflow as tf
-from typing import cast
 
 from .custom_model import CustomModel
 from .. import layers
-from ..losses import chamfer_distance
+from ..losses import SortedLoss
 from ..registry import CustomObject
 
 @CustomObject
@@ -69,33 +68,31 @@ class SetBertModel(CustomModel[tf.Tensor, tf.Tensor]):
 
 
 @CustomObject
-class SetBertPretrainingModel(CustomModel[tf.Tensor, tf.Tensor]):
+class SetBertPretrainModel(CustomModel[tf.Tensor, tf.Tensor]):
     def __init__(self, base: SetBertModel, mask_ratio = 0.15, **kwargs):
         super().__init__(**kwargs)
         self.base = base
-        self.mask_ratio = tf.Variable(
-            mask_ratio,
-            trainable=False,
-            dtype=tf.float32,
-            name="Mask_Ratio")
+        self.masking = layers.SetMask(self.base.embed_dim, self.base.max_set_len, mask_ratio)
         self.model = self.build_model()
 
     def build_model(self):
         y = x = tf.keras.layers.Input((self.base.max_set_len, self.base.embed_dim))
-        num_masked, y = layers.SetMask(
-            self.base.embed_dim,
-            self.base.max_set_len,
-            self.mask_ratio)(y)
+        num_masked, y = self.masking(y)
         y = self.base(y)
         # Only keep masked items. Since Chamfer distance doesn't support masking,
         # we need to explicitly remove the unmasked items.
         y = tf.keras.layers.Lambda(lambda x: x[0][:,1:x[1]+1,:])((y, num_masked))
         return tf.keras.Model(x, (num_masked, y))
 
-    def compile(self, **kwargs):
-        if "loss" not in kwargs:
-            kwargs["loss"] = chamfer_distance
-        super().compile(**kwargs)
+    def compile(self,  **kwargs):
+        defaults = {
+            # Since the model is permutation-equivariant, we only need to
+            # ensure that the items that were masked are compared to the
+            # correct predictions. This can be done easily by sorting the
+            # elements before comparing.
+            "loss": SortedLoss(tf.keras.losses.mean_squared_error)
+        }
+        return super().compile(defaults | kwargs)
 
     def call(self, inputs):
         return self.model(inputs)
@@ -127,4 +124,29 @@ class SetBertPretrainingModel(CustomModel[tf.Tensor, tf.Tensor]):
         return super().get_config() | {
             "base": self.base,
             "mask_ratio": self.mask_ratio
+        }
+
+
+@CustomObject
+class SetBertEncoderModel(CustomModel[tf.Tensor, tf.Tensor]):
+    def __init__(self, base: SetBertModel, **kwargs):
+        super().__init__(**kwargs)
+        self.base = base
+        self.model = self.build_model()
+
+    def build_model(self):
+        y = x = tf.keras.layers.Input(self.base.model.input_shape[1:])
+        y = self.base(y)
+        token, _ = layers.SplitClassToken()(y)
+        return tf.keras.Model(x, token)
+
+    def call(self, inputs):
+        return self.model(inputs)
+
+    def compute_output_shape(self, input_shape):
+        return self.model.output_shape
+
+    def get_config(self):
+        return super().get_config() | {
+            "base": self.base
         }
