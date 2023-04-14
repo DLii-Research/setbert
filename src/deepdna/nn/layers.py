@@ -609,14 +609,19 @@ class SetMask(tf.keras.layers.Layer):
         self,
         embed_dim: int,
         max_set_len: int,
-        mask_ratio: tf.Variable|float = 0.15,
+        mask_ratio: float = 0.15,
         use_keras_mask: bool = False,
         **kwargs
     ):
         super().__init__(**kwargs)
         self.embed_dim = embed_dim
         self.max_set_len = max_set_len
-        self.mask_ratio = mask_ratio
+        self.mask_ratio = tf.Variable(
+            mask_ratio,
+            trainable=False,
+            dtype=tf.float32,
+            name="Mask_Ratio"
+        )
         self.use_keras_mask = use_keras_mask
         self.mask_tokens = self.add_weight(
             shape=(1, tfcast(self.mask_ratio*self.max_set_len, tf.int32), self.embed_dim), # type: ignore
@@ -652,7 +657,7 @@ class SetMask(tf.keras.layers.Layer):
         return super().get_config() | {
             "embed_dim": self.embed_dim,
             "max_set_len": self.max_set_len,
-            "mask_ratio": self.mask_ratio,
+            "mask_ratio": self.mask_ratio.numpy(), # type: ignore
             "use_keras_mask": self.use_keras_mask
         }
 
