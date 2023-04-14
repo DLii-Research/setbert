@@ -8,7 +8,7 @@ from tf_utilities.utils import str_to_bool
 
 from deepdna.data.dataset import Dataset
 from deepdna.nn.callbacks import LearningRateStepScheduler
-from deepdna.nn.data_generators import FastaSequenceGenerator
+from deepdna.nn.data_generators import SequenceGenerator
 from deepdna.nn.models import dnabert, load_model
 from deepdna.nn.utils import optimizer
 
@@ -48,14 +48,14 @@ def define_arguments(cli):
     cli.argument("--log-artifact", type=str, default=None)
 
 
-def load_datasets(config) -> tuple[FastaSequenceGenerator, FastaSequenceGenerator|None]:
+def load_datasets(config) -> tuple[SequenceGenerator, SequenceGenerator|None]:
     dataset = Dataset(config.dataset_path)
     generator_args = dict(
         sequence_length = config.sequence_length,
         kmer = config.kmer,
         batch_size = config.batch_size,
     )
-    train = FastaSequenceGenerator(
+    train = SequenceGenerator(
         map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Train)),
         batches_per_epoch=config.batches_per_epoch,
         rng = tfs.rng(),
@@ -63,7 +63,7 @@ def load_datasets(config) -> tuple[FastaSequenceGenerator, FastaSequenceGenerato
     )
     validation = None
     if dataset.has_split(Dataset.Split.Test):
-        validation = FastaSequenceGenerator(
+        validation = SequenceGenerator(
             map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Test)),
             batches_per_epoch=config.val_batches_per_epoch,
             rng = tfs.rng(),
