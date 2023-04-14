@@ -100,7 +100,7 @@ def create_model(config):
         stack=config.stack,
         num_heads=config.num_heads,
         pre_layernorm=config.pre_layernorm)
-    model = setbert.SetBertPretrainingModel(
+    model = setbert.SetBertPretrainModel(
         base=base,
         mask_ratio=config.mask_ratio)
 
@@ -108,7 +108,7 @@ def create_model(config):
         case "chamfer":
             loss_fn = losses.chamfer_distance
         case "setloss":
-            loss_fn = losses.SetLoss()
+            loss_fn = losses.SortedLoss()
         case _:
             raise ValueError(f"Unknown loss function: {config.loss_fn}")
 
@@ -120,7 +120,7 @@ def create_model(config):
     return model
 
 
-def load_previous_model(path: str|Path) -> setbert.SetBertPretrainingModel:
+def load_previous_model(path: str|Path) -> setbert.SetBertPretrainModel:
     print("Loading model from previous run:", path)
     return load_model(path)
 
@@ -172,8 +172,7 @@ def train(config, model_path):
 
         # Save the model
         if config.save_to:
-            # ONLY SAVE BASE FOR NOW
-            model.base.save(tfs.path_to(config.save_to))
+            model.save(tfs.path_to(config.save_to))
 
     return model
 
@@ -188,7 +187,6 @@ def main(argv):
     model_path = None
     if tfs.is_resumed():
         print("Restoring previous model...")
-        raise Exception("Cannot currently resume SetBERT runs.")
         model_path = tfs.restore_dir(config.save_to)
 
     print(config)

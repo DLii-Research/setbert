@@ -1,9 +1,11 @@
 import numpy as np
 import tensorflow as tf
+from .registry import CustomObject
 
 # https://github.com/tensorflow/graphics/blob/master/tensorflow_graphics/nn/loss/chamfer_distance.py
 # The implementation from TFG appears to have a bug checking the shapes...
 # This is the same implementation as in TFG without the shape checks.
+@CustomObject
 def chamfer_distance(
     point_set_a: tf.Tensor | np.ndarray,
     point_set_b: tf.Tensor | np.ndarray,
@@ -53,3 +55,18 @@ def chamfer_distance(
     return (
         tf.reduce_mean(input_tensor=minimum_square_distance_a_to_b, axis=-1) +
         tf.reduce_mean(input_tensor=minimum_square_distance_b_to_a, axis=-1))
+
+
+@CustomObject
+class SortedLoss(tf.keras.losses.Loss):
+    def __init__(self, loss_fn = tf.losses.mean_squared_error, **kwargs):
+        super().__init__(**kwargs)
+        self.loss_fn = loss_fn
+
+    def call(self, y_true, y_pred, sample_weight=None):
+        y_true = tf.sort(y_true, axis=1)
+        y_pred = tf.sort(y_pred, axis=1)
+        try:
+            return self.loss_fn(y_true, y_pred, sample_weight=sample_weight)
+        except TypeError:
+            return self.loss_fn(y_true, y_pred)

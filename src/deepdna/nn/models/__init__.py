@@ -4,7 +4,7 @@ import tensorflow as tf
 from typing import Any, cast, TypeVar
 
 # Import layers and model submodules to ensure everything is registered correctly.
-from .. import layers, registry
+from .. import layers, losses, registry
 from . import dnabert, setbert, setbert, utils
 
 ModelType = TypeVar("ModelType", bound=tf.keras.Model)

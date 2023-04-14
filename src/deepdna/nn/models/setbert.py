@@ -85,14 +85,14 @@ class SetBertPretrainModel(CustomModel[tf.Tensor, tf.Tensor]):
         return tf.keras.Model(x, (num_masked, y))
 
     def compile(self,  **kwargs):
-        defaults = {
+        config = {
             # Since the model is permutation-equivariant, we only need to
             # ensure that the items that were masked are compared to the
             # correct predictions. This can be done easily by sorting the
             # elements before comparing.
             "loss": SortedLoss(tf.keras.losses.mean_squared_error)
-        }
-        return super().compile(defaults | kwargs)
+        } | kwargs
+        return super().compile(**config)
 
     def call(self, inputs):
         return self.model(inputs)
@@ -123,7 +123,7 @@ class SetBertPretrainModel(CustomModel[tf.Tensor, tf.Tensor]):
     def get_config(self):
         return super().get_config() | {
             "base": self.base,
-            "mask_ratio": self.mask_ratio
+            "mask_ratio": self.masking.mask_ratio.numpy() # type: ignore
         }
 
 
