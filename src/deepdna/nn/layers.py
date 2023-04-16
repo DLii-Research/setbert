@@ -1,7 +1,8 @@
 # import numpy as np
+from dnadb import taxonomy
 import tensorflow as tf
 from settransformer import custom_layers as __settransformer_layers
-from typing import Any, Callable, cast, Generic, TypeVar, ParamSpec
+from typing import Any, Callable, cast, Generic, ParamSpec, TypedDict, TypeVar
 
 from . registry import CustomObject, register_custom_objects
 from . utils import tfcast
@@ -713,6 +714,63 @@ class SampleSet(TypedLayer[[tf.Tensor], tf.Tensor]):
             "embed_dim": self.embed_dim
         })
         return config
+
+# DNA Related Layers -------------------------------------------------------------------------------
+
+TaxonomyOutputDict = TypedDict(
+    "TaxonomyOutputDict",
+    {
+        "kingdom": tf.Tensor,
+        "phylum": tf.Tensor,
+        "class": tf.Tensor,
+        "order": tf.Tensor,
+        "family": tf.Tensor,
+        "genus": tf.Tensor,
+        "species": tf.Tensor
+    },
+    total=False)
+
+@CustomObject
+class TaxonomyHierarchyBlock(TypedLayer[[tf.Tensor], TaxonomyOutputDict]):
+    @classmethod
+    def from_hierarchy(cls, hierarchy: taxonomy.TaxonomyHierarchy):
+        taxon_counts_by_level = tuple(
+            tuple(len(t.children) for t in taxon_map.values()) for taxon_map in hierarchy.taxon_maps
+        )
+        return cls(taxon_counts_by_level)
+
+    def __init__(self, taxon_counts_by_level: tuple[tuple[int, ...], ...], **kwargs):
+        super().__init__(**kwargs)
+        self.taxon_counts_by_level = taxon_counts_by_level
+        self.dense_layers = [
+            tf.keras.layers.Dense(len(taxon_counts), name=name)
+            for name, taxon_counts in zip(taxonomy.TAXON_LEVEL_NAMES, self.taxon_counts_by_level)]
+
+    def call(self, inputs: tf.Tensor) -> dict[str, tf.Tensor]:
+        """
+        Outputs
+        """
+        outputs = [self.dense_layers[0](inputs)]
+        for dense, taxon_counts in zip(self.dense_layers[1:], self.taxon_counts_by_level):
+            # Use previous output to gate the next layer
+            gate_indices = [j for j, count in enumerate(taxon_counts) for _ in range(count)]
+            gate = tf.gather(outputs[-1], gate_indices, axis=-1)
+            outputs.append(dense(inputs) + gate)
+        outputs = cast(list[tf.Tensor], [
+            tf.nn.softmax(o, name=name) for name, o in zip(taxonomy.TAXON_LEVEL_NAMES, outputs)
+        ])
+        return { name.lower(): output for name, output in zip(taxonomy.TAXON_LEVEL_NAMES, outputs) }
+        # return tuple(outputs)
+
+    def compute_output_shape(self, input_shape):
+        return tuple(
+            (input_shape[:-1], len(taxon_map))
+            for taxon_map in self.hierarchy.taxon_maps[:self.depth])
+
+    def get_config(self):
+        return super().get_config() | {
+            "taxon_counts_by_level": self.taxon_counts_by_level
+        }
 
 # Utility Layers -----------------------------------------------------------------------------------
 
