@@ -239,6 +239,7 @@ class FastaTaxonomyGenerator(BatchGenerator):
         subsample_size: int = 0,
         augment_slide: bool = True,
         augment_ambiguous_bases: bool = True,
+        labels_as_dict: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ):
         super().__init__(batch_size, batches_per_epoch, rng)
@@ -253,6 +254,7 @@ class FastaTaxonomyGenerator(BatchGenerator):
         self.subsample_size = subsample_size
         self.hierarchy = taxonomy.TaxonomyHierarchy.merge((db.hierarchy for db in self.taxonomy_dbs))
         self.hierarchy.depth = taxonomy_depth
+        self.labels_as_dict = labels_as_dict
 
     def generate_batch(self, rng: np.random.Generator):
         sample_indices, entries = self.sampler.random_entries(
@@ -264,13 +266,18 @@ class FastaTaxonomyGenerator(BatchGenerator):
             for j, entry in enumerate(sample_entries):
                 labels[i, j] = self.hierarchy.identifier_map.encode_entry(
                     taxonomy_db[entry.identifier])
+        labels = labels.transpose((2, 0, 1))
         if self.subsample_size == 0:
             sequences = np.squeeze(sequences, axis=1)
-            labels = np.squeeze(labels, axis=1)
+            labels = np.squeeze(labels, axis=2)
         if self.kmer > 1:
             sequences = dna.encode_kmers(
                 sequences, self.kmer, not self.sampler.augment_ambiguous_bases) # type: ignore
-        return sequences, labels
+        if self.labels_as_dict:
+            return sequences, {
+                name.lower(): l for name, l in zip(taxonomy.TAXON_LEVEL_NAMES, labels)
+            }
+        return sequences, tuple(labels)
 
     @property
     def samples(self):
