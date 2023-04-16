@@ -1,13 +1,13 @@
 import settransformer as st
 import tensorflow as tf
 
-from .custom_model import CustomModel
+from .custom_model import ModelWrapper, CustomModel
 from .. import layers
 from ..losses import SortedLoss
 from ..registry import CustomObject
 
 @CustomObject
-class SetBertModel(CustomModel[tf.Tensor, tf.Tensor]):
+class SetBertModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
     def __init__(
         self,
         embed_dim: int,
@@ -50,12 +50,6 @@ class SetBertModel(CustomModel[tf.Tensor, tf.Tensor]):
                 )(y)
         return tf.keras.Model(x, y)
 
-    def call(self, inputs):
-        return self.model(inputs)
-
-    def compute_output_shape(self, input_shape):
-        return self.model.compute_output_shape(input_shape)
-
     def get_config(self):
         return super().get_config() | {
             "embed_dim": self.embed_dim,
@@ -68,7 +62,7 @@ class SetBertModel(CustomModel[tf.Tensor, tf.Tensor]):
 
 
 @CustomObject
-class SetBertPretrainModel(CustomModel[tf.Tensor, tf.Tensor]):
+class SetBertPretrainModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
     def __init__(self, base: SetBertModel, mask_ratio = 0.15, **kwargs):
         super().__init__(**kwargs)
         self.base = base
@@ -84,7 +78,7 @@ class SetBertPretrainModel(CustomModel[tf.Tensor, tf.Tensor]):
         y = tf.keras.layers.Lambda(lambda x: x[0][:,1:x[1]+1,:])((y, num_masked))
         return tf.keras.Model(x, (num_masked, y))
 
-    def compile(self,  **kwargs):
+    def compile(self, **kwargs):
         config = {
             # Since the model is permutation-equivariant, we only need to
             # ensure that the items that were masked are compared to the
@@ -93,12 +87,6 @@ class SetBertPretrainModel(CustomModel[tf.Tensor, tf.Tensor]):
             "loss": SortedLoss(tf.keras.losses.mean_squared_error)
         } | kwargs
         return super().compile(**config)
-
-    def call(self, inputs):
-        return self.model(inputs)
-
-    def compute_output_shape(self, input_shape):
-        return self.model.compute_output_shape(input_shape)
 
     def train_step(self, batch):
         x, y = batch
@@ -128,23 +116,17 @@ class SetBertPretrainModel(CustomModel[tf.Tensor, tf.Tensor]):
 
 
 @CustomObject
-class SetBertEncoderModel(CustomModel[tf.Tensor, tf.Tensor]):
+class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
     def __init__(self, base: SetBertModel, **kwargs):
         super().__init__(**kwargs)
         self.base = base
         self.model = self.build_model()
 
     def build_model(self):
-        y = x = tf.keras.layers.Input(self.base.model.input_shape[1:])
+        y = x = tf.keras.layers.Input(self.base.input_shape[1:])
         y = self.base(y)
         token, _ = layers.SplitClassToken()(y)
         return tf.keras.Model(x, token)
-
-    def call(self, inputs):
-        return self.model(inputs)
-
-    def compute_output_shape(self, input_shape):
-        return self.model.output_shape
 
     def get_config(self):
         return super().get_config() | {

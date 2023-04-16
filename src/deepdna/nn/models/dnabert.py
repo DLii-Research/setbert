@@ -1,12 +1,16 @@
+from dnadb.taxonomy import TAXON_LEVEL_NAMES, TaxonomyHierarchy
+import json
 import tensorflow as tf
 from typing import cast
 
-from .custom_model import CustomModel
+from .custom_model import ModelWrapper, CustomModel
 from .. import layers
+from ..metrics import TaxonCategoricalAccuracy
+from ..losses import TaxonCategoricalCrossentropy
 from ..registry import CustomObject
 
 @CustomObject
-class DnaBertModel(CustomModel[tf.Tensor, tf.Tensor]):
+class DnaBertModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
     """
     The base DNABERT model definition.
     """
@@ -49,12 +53,6 @@ class DnaBertModel(CustomModel[tf.Tensor, tf.Tensor]):
                 prenorm=self.pre_layernorm)(y)
         return tf.keras.Model(x, y)
 
-    def call(self, inputs: tf.Tensor, training=None) -> tf.Tensor:
-        return cast(tf.Tensor, self.model(inputs, training=training))
-
-    def compute_output_shape(self, input_shape):
-        return (input_shape[0], self.sequence_length - self.kmer + 1 + 1, self.embed_dim)
-
     def get_config(self):
         return super().get_config() | {
             "sequence_length": self.sequence_length,
@@ -69,7 +67,7 @@ class DnaBertModel(CustomModel[tf.Tensor, tf.Tensor]):
 
 
 @CustomObject
-class DnaBertPretrainModel(CustomModel[tf.Tensor, tf.Tensor]):
+class DnaBertPretrainModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
     """
     The DNABERT pretraining model architecture
     """
@@ -113,9 +111,6 @@ class DnaBertPretrainModel(CustomModel[tf.Tensor, tf.Tensor]):
             kwargs["loss"] = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         super().compile(**kwargs)
 
-    def call(self, inputs, training=None):
-        return self.model(inputs, training=training)
-
     def compute_output_shape(self, input_shape):
         return self.model.compute_output_shape(input_shape)
 
@@ -129,7 +124,7 @@ class DnaBertPretrainModel(CustomModel[tf.Tensor, tf.Tensor]):
 
 
 @CustomObject
-class DnaBertEncoderModel(CustomModel[tf.Tensor, tf.Tensor]):
+class DnaBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
     """
     The DNABERT encoder/embedding model architecture
     """
@@ -151,14 +146,44 @@ class DnaBertEncoderModel(CustomModel[tf.Tensor, tf.Tensor]):
             model = tf.keras.Model(x, y)
         return model
 
-    def call(self, inputs: tf.Tensor, training=None):
-        return self.model(inputs, training=training)
-
-    def compute_output_shape(self, input_shape):
-        return self.model.output_shape
-
     def get_config(self):
         return super().get_config() | {
             "base": self.base,
             "subsamples": self.subsamples
         }
+
+
+@CustomObject
+class DnaBertTaxonomyModel(ModelWrapper, CustomModel[tf.Tensor, layers.TaxonomyOutputDict]):
+    def __init__(self, base: DnaBertModel, hierarchy: TaxonomyHierarchy, **kwargs):
+        super().__init__(**kwargs)
+        self.base = base
+        self.hierarchy = hierarchy
+        self.model = self.build_model()
+
+    def build_model(self):
+        y = x = tf.keras.layers.Input(self.base.input_shape[1:], dtype=self.base.input.dtype)
+        y = self.base(y)
+        y, _ = layers.SplitClassToken()(y)
+        y = layers.TaxonomyHierarchyBlock.from_hierarchy(self.hierarchy)(y)
+        return tf.keras.Model(x, y)
+
+    def compile(self, **kwargs):
+        defaults = {
+            "loss": TaxonCategoricalCrossentropy(),
+            "metrics": []
+        }
+        kwargs = defaults | kwargs
+        kwargs["metrics"].append(TaxonCategoricalAccuracy(name="accuracy"))
+        return super().compile(**kwargs)
+
+    def get_config(self):
+        return super().get_config() | {
+            "base": self.base,
+            "hierarchy": json.dumps(self.hierarchy.to_json())
+        }
+
+    @classmethod
+    def from_config(cls, config):
+        config["hierarchy"] = TaxonomyHierarchy.from_json(json.loads(config["hierarchy"]))
+        return super().from_config(config)

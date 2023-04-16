@@ -16,6 +16,78 @@ class TypedModel(tf.keras.Model, Generic[Params, ReturnType]):
     ) -> ReturnType:
         return cast(ReturnType, super().__call__(inputs, training=training))
 
+
+ModelType = TypeVar("ModelType", bound=tf.keras.models.Model)
+class ModelWrapper(Generic[ModelType]):
+    """
+    For models that wrap a model to add extended funcitonality,
+    this class ties the model wrapper's properties to the nested
+    model's properties, along with a generic call method.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model: ModelType
+
+    @property
+    def input_shape(self):
+        return self.model.input_shape
+
+    @property
+    def output_shape(self):
+        return self.model.output_shape
+
+    @property
+    def input(self):
+        return self.model.input
+
+    @property
+    def output(self):
+        return self.model.output
+
+    @property
+    def inputs(self):
+        return self.model.inputs
+
+    @inputs.setter
+    def inputs(self, value):
+        self.model.inputs = value
+
+    @property
+    def outputs(self):
+        return self.model.outputs
+
+    @outputs.setter
+    def outputs(self, value):
+        self.model.outputs = value
+
+    @property
+    def input_names(self):
+        return self.model.input_names
+
+    @input_names.setter
+    def input_names(self, value):
+        self.model.input_names = value
+
+    @property
+    def output_names(self):
+        return self.model.output_names
+
+    @output_names.setter
+    def output_names(self, value):
+        self.model.output_names = value
+
+    def call(self, *args, **kwargs):
+        return self.model(*args, **kwargs)
+
+    def compute_output_shape(self, input_shape):
+        return self.model.compute_output_shape(input_shape)
+
+    def __setattr__(self, name, value):
+        if name in ("inputs", "outputs", "input_names", "output_names"):
+            return
+        super().__setattr__(name, value)
+
+
 class CustomModel(TypedModel[Params, ReturnType], Generic[Params, ReturnType]):
 
     def __init__(self, *args, **kwargs):
