@@ -1,6 +1,5 @@
 from dnadb import dna, fasta, fastq, taxonomy
 import numpy as np
-import numpy.typing as npt
 import tensorflow as tf
 from typing import cast, Iterable
 
@@ -123,7 +122,7 @@ class SequenceGenerator(BatchGenerator):
     def __init__(
         self,
         samples: Iterable[fasta.FastaDb|fastq.FastqDb],
-        sequence_length: int = 150,
+        sequence_length: int,
         kmer: int = 1,
         batch_size: int = 32,
         batches_per_epoch: int = 100,
@@ -182,7 +181,7 @@ class SampleGenerator(BatchGenerator):
     def __init__(
         self,
         samples: Iterable[fasta.FastaDb],
-        sequence_length: int = 150,
+        sequence_length: int,
         kmer: int = 1,
         batch_size: int = 32,
         batches_per_epoch: int = 100,
@@ -231,7 +230,7 @@ class FastaTaxonomyGenerator(BatchGenerator):
     def __init__(
         self,
         samples: Iterable[tuple[fasta.FastaDb, taxonomy.TaxonomyDb]],
-        sequence_length: int = 150,
+        sequence_length: int,
         kmer: int = 1,
         taxonomy_depth: int = 6,
         batch_size: int = 32,
@@ -252,7 +251,8 @@ class FastaTaxonomyGenerator(BatchGenerator):
         self.taxonomy_dbs = cast(tuple[taxonomy.TaxonomyDb, ...], taxonomy_dbs)
         self.kmer = kmer
         self.subsample_size = subsample_size
-        self.hierarchy = taxonomy.TaxonomyHierarchy.merge((db.hierarchy for db in self.taxonomy_dbs))
+        self.hierarchy = taxonomy.TaxonomyHierarchy.merge(
+            (db.hierarchy for db in self.taxonomy_dbs))
         self.hierarchy.depth = taxonomy_depth
         self.labels_as_dict = labels_as_dict
 
