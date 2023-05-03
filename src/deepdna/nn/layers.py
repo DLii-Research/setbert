@@ -460,6 +460,9 @@ class BaseTransformerBlock(TypedLayer[[tf.Tensor], tf.Tensor]):
             return self.att_prenorm(inputs, training)
         return self.att_postnorm(inputs, training)
 
+    def compute_output_shape(self, input_shape):
+        return input_shape
+
     def get_config(self):
         config = super().get_config()
         config.update({
@@ -544,6 +547,9 @@ class EmbeddingWithClassToken(TypedLayer[[tf.Tensor], tf.Tensor]):
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
         token = tf.tile(self.token_id, (tf.shape(inputs)[0], 1))
         return cast(tf.Tensor, self.embedding(tf.concat([token, inputs], axis=1)))
+
+    def compute_output_shape(self, input_shape):
+        return (*input_shape[:-1], input_shape[-1] + 1, self.embed_dim)
 
     def get_config(self):
         config = super().get_config()
@@ -730,8 +736,9 @@ TaxonomyOutputDict = TypedDict(
     },
     total=False)
 
+
 @CustomObject
-class TaxonomyHierarchyBlock(TypedLayer[[tf.Tensor], TaxonomyOutputDict]):
+class TaxonomyBlock(TypedLayer[[tf.Tensor], TaxonomyOutputDict]):
     @classmethod
     def from_hierarchy(cls, hierarchy: taxonomy.TaxonomyHierarchy):
         taxon_counts_by_level = tuple(
@@ -742,9 +749,66 @@ class TaxonomyHierarchyBlock(TypedLayer[[tf.Tensor], TaxonomyOutputDict]):
     def __init__(self, taxon_counts_by_level: tuple[tuple[int, ...], ...], **kwargs):
         super().__init__(**kwargs)
         self.taxon_counts_by_level = taxon_counts_by_level
+        self.output_names = list(map(
+            str.lower,
+            taxonomy.TAXON_LEVEL_NAMES[:len(taxon_counts_by_level)]))
         self.dense_layers = [
-            tf.keras.layers.Dense(len(taxon_counts), name=name)
-            for name, taxon_counts in zip(taxonomy.TAXON_LEVEL_NAMES, self.taxon_counts_by_level)]
+            tf.keras.layers.Dense(len(taxon_counts), activation="softmax")
+            for taxon_counts in self.taxon_counts_by_level]
+
+    def call(self, inputs: tf.Tensor) -> dict[str, tf.Tensor]:
+        """
+        Outputs
+        """
+        prev = inputs
+        out_layer = []
+        for dense in self.dense_layers:
+            out = dense(prev)
+            out_layer.append(out)
+            in_help = out_layer.copy()
+            in_help.append(prev)
+            prev = tf.concat(in_help, axis=1)
+        return { name.lower(): output for name, output in zip(self.output_names, out_layer) }
+
+    def compute_output_shape(self, input_shape):
+        return tuple(
+            (input_shape[:-1], len(taxon_map))
+            for taxon_map in self.hierarchy.taxon_maps[:self.depth])
+
+    def get_config(self):
+        return super().get_config() | {
+            "taxon_counts_by_level": self.taxon_counts_by_level
+        }
+
+
+@CustomObject
+class TaxonomyHierarchyBlock(TypedLayer[[tf.Tensor], TaxonomyOutputDict]):
+    @classmethod
+    def from_hierarchy(
+        cls,
+        hierarchy: taxonomy.TaxonomyHierarchy,
+        output_logits: bool = False,
+    ):
+        taxon_counts_by_level = tuple(
+            tuple(len(t.children) for t in taxon_map.values()) for taxon_map in hierarchy.taxon_maps
+        )
+        return cls(taxon_counts_by_level, output_logits)
+
+    def __init__(
+        self,
+        taxon_counts_by_level: tuple[tuple[int, ...], ...],
+        output_logits: bool,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.taxon_counts_by_level = taxon_counts_by_level
+        self.output_logits = output_logits
+        self.output_names = list(map(
+            str.lower,
+            taxonomy.TAXON_LEVEL_NAMES[:len(taxon_counts_by_level)]))
+        self.dense_layers = [
+            tf.keras.layers.Dense(len(taxon_counts))
+            for taxon_counts in self.taxon_counts_by_level]
 
     def call(self, inputs: tf.Tensor) -> dict[str, tf.Tensor]:
         """
@@ -756,11 +820,9 @@ class TaxonomyHierarchyBlock(TypedLayer[[tf.Tensor], TaxonomyOutputDict]):
             gate_indices = [j for j, count in enumerate(taxon_counts) for _ in range(count)]
             gate = tf.gather(outputs[-1], gate_indices, axis=-1)
             outputs.append(dense(inputs) + gate)
-        outputs = cast(list[tf.Tensor], [
-            tf.nn.softmax(o, name=name) for name, o in zip(taxonomy.TAXON_LEVEL_NAMES, outputs)
-        ])
-        return { name.lower(): output for name, output in zip(taxonomy.TAXON_LEVEL_NAMES, outputs) }
-        # return tuple(outputs)
+        if not self.output_logits:
+            outputs = map(tf.nn.softmax, outputs)
+        return { name: output for name, output in zip(self.output_names, outputs) }
 
     def compute_output_shape(self, input_shape):
         return tuple(
