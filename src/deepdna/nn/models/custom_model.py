@@ -48,33 +48,17 @@ class ModelWrapper(Generic[ModelType]):
     def inputs(self):
         return self.model.inputs
 
-    @inputs.setter
-    def inputs(self, value):
-        self.model.inputs = value
-
     @property
     def outputs(self):
         return self.model.outputs
-
-    @outputs.setter
-    def outputs(self, value):
-        self.model.outputs = value
 
     @property
     def input_names(self):
         return self.model.input_names
 
-    @input_names.setter
-    def input_names(self, value):
-        self.model.input_names = value
-
     @property
     def output_names(self):
         return self.model.output_names
-
-    @output_names.setter
-    def output_names(self, value):
-        self.model.output_names = value
 
     def call(self, *args, **kwargs):
         return self.model(*args, **kwargs)
