@@ -217,8 +217,11 @@ class SetBertPretrainModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
         return {m.name: m.result() for m in self.metrics}
 
     def test_step(self, batch):
-        x, y = batch
-        num_masked, y_pred = self(x)
+        x, _ = batch
+        y_pred, num_masked, y = self(
+            x,
+            return_num_masked=True,
+            return_embeddings=True)
         y = y[:,:num_masked,:]
         self.compiled_loss(y, y_pred, regularization_losses=self.losses)
         self.compiled_metrics.update_state(y, y_pred)
@@ -226,7 +229,7 @@ class SetBertPretrainModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
 
     def call(self, inputs, training=None, return_num_masked=False, return_embeddings=False):
         embeddings = tf.stop_gradient(self.base.dnabert_encoder.encode(inputs))
-        num_masked, y_pred = self.model(embeddings)
+        num_masked, y_pred = self.model(embeddings, training=training)
         result = (y_pred,)
         if return_num_masked:
             result += (num_masked,)
