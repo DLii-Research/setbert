@@ -268,7 +268,7 @@ class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
 
     def build_model(self):
         y = x = tf.keras.layers.Input(self.base.input_shape[1:])
-        y = self.base.dnabert_encoder(y)
+        # y = self.base.dnabert_encoder(y)
         y = self.base(y)
         token, _ = layers.SplitClassToken()(y)
         return tf.keras.Model(x, token)
