@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 from typing import cast, Iterable
 
+from ..data.otu import OtuSampleDb, OtuSampleEntry
 from .models import dnabert
 
 class BatchGenerator(tf.keras.utils.Sequence):
@@ -50,6 +51,142 @@ class BatchGenerator(tf.keras.utils.Sequence):
 
     def __len__(self):
         return self.batches_per_epoch
+
+
+class OtuSampler:
+    def __init__(
+        self,
+        samples: Iterable[tuple[fasta.FastaDb, OtuSampleDb]],
+        sequence_length: int,
+        use_presence_absence: bool = False,
+        augment_slide: bool = True,
+        augment_ambiguous_bases: bool = True
+    ):
+        self.samples = tuple(samples)
+        self.sequence_length = sequence_length
+        self.use_presence_absence = use_presence_absence
+        self.augment_slide = augment_slide
+        self.augment_ambiguous_bases = augment_ambiguous_bases
+
+    def augment_sequence_slide(self, sequence: str, rng: np.random.Generator):
+        """
+        Trim and optionally slide the sequence randomly.
+        """
+        offset = rng.integers(len(sequence) - self.sequence_length + 1) if self.augment_slide else 0
+        return sequence[offset:offset+self.sequence_length]
+
+    def sequences(
+        self,
+        sample_entries: list[list[fasta.FastaEntry]],
+        rng: np.random.Generator
+    ):
+        """
+        Get the encoded + augmented sequences from the sample entries.
+        """
+        if self.augment_slide:
+            slide_offsets = rng.uniform(size=(len(sample_entries), len(sample_entries[0])))
+        else:
+            slide_offsets = np.zeros((len(sample_entries), len(sample_entries[0])))
+        output_shape = (len(sample_entries), len(sample_entries[0]), self.sequence_length)
+        sequences = np.empty(output_shape, dtype=np.uint8)
+        for i, sample in enumerate(sample_entries):
+            for j, entry in enumerate(sample):
+                sequence = entry.sequence.encode()
+                offset = int((len(sequence) - self.sequence_length + 1)*slide_offsets[i,j])
+                sequences[i,j] = np.frombuffer(
+                    sequence, np.uint8, offset=offset, count=self.sequence_length)
+        sequences = dna.encode(sequences)
+        if self.augment_ambiguous_bases:
+            sequences = dna.replace_ambiguous_encoded_bases(sequences, rng)
+        return sequences.astype(np.int32)
+
+    def random_entries(self, num_samples: int, subsample_size: int, rng: np.random.Generator):
+        """
+        Draw samples at random and return random subsamples from each one.
+        """
+        # Draw some random FASTA/OTU files
+        file_indices = rng.choice(len(self.samples), num_samples)
+        files = tuple(self.samples[i] for i in file_indices)
+
+        sample_offsets = rng.uniform(size=num_samples)
+        sample_indices = (sample_offsets*[len(f[1]) for f in files]).astype(np.int32)
+
+        fasta_entries = []
+        for (fasta_db, otu_db), sample_index in zip(files, sample_indices):
+            entry: OtuSampleEntry = otu_db[sample_index]
+            p = None if self.use_presence_absence else (entry.otu_counts / np.sum(entry.otu_counts))
+            otu_ids, counts = np.unique(
+                rng.choice(entry.otu_indices, subsample_size, replace=True, p=p),
+                return_counts=True
+            )
+
+            fasta_subsample = []
+            for otu_id, count in zip(otu_ids, counts):
+                sequence_id = otu_db.sequence_id(otu_id)
+                fasta_subsample += [fasta_db[sequence_id]]*count
+            fasta_entries.append(fasta_subsample)
+        return (file_indices, sample_indices), fasta_entries
+
+
+class OtuSequenceGenerator(BatchGenerator):
+    """
+    Generate sequences from given FASTA files.
+    """
+    def __init__(
+        self,
+        samples: Iterable[tuple[fasta.FastaDb, OtuSampleDb]],
+        sequence_length: int,
+        kmer: int = 1,
+        use_presence_absence: bool = False,
+        batch_size: int = 32,
+        batches_per_epoch: int = 100,
+        subsample_size: int = 0,
+        augment_slide: bool = True,
+        augment_ambiguous_bases: bool = True,
+        use_kmer_inputs: bool = True,
+        use_kmer_labels: bool = True,
+        rng: np.random.Generator = np.random.default_rng()
+    ):
+        super().__init__(batch_size, batches_per_epoch, rng)
+        if subsample_size > 0:
+            to_keep: list[tuple[fasta.FastaDb, OtuSampleDb]] = []
+            for sample, otus in samples:
+                if len(sample) < subsample_size:
+                    print(f"WARNING: Skipping sample {sample.path.name} because it has too few sequences ({len(sample)} < {subsample_size})")
+                    continue
+                to_keep.append((sample, otus))
+            samples = to_keep
+        self.sampler = OtuSampler(
+            samples,
+            sequence_length,
+            use_presence_absence=use_presence_absence,
+            augment_slide=augment_slide,
+            augment_ambiguous_bases=augment_ambiguous_bases)
+        self.kmer = kmer
+        self.subsample_size = subsample_size
+        self.use_kmer_inputs = use_kmer_inputs
+        self.use_kmer_labels = use_kmer_labels
+
+    def generate_batch(self, rng: np.random.Generator):
+        _, entries = self.sampler.random_entries(
+            self.batch_size, max(1, self.subsample_size), rng)
+        sequences = self.sampler.sequences(entries, rng)
+        if self.subsample_size == 0:
+            sequences = np.squeeze(sequences, axis=1)
+        x = y = sequences
+        if self.kmer > 1:
+            kmers = dna.encode_kmers(x, self.kmer, not self.sampler.augment_ambiguous_bases) # type: ignore
+            x = kmers if self.use_kmer_inputs else x
+            y = kmers if self.use_kmer_labels else y
+        return x, y
+
+    @property
+    def samples(self):
+        return self.sampler.samples
+
+    @property
+    def sequence_length(self):
+        return self.sampler.sequence_length
 
 
 class SequenceSampler:
@@ -305,6 +442,50 @@ class SequenceEmbeddingGenerator(SequenceGenerator):
             samples=samples,
             sequence_length=dnabert_base.sequence_length,
             kmer=dnabert_base.kmer,
+            batch_size=batch_size,
+            batches_per_epoch=batches_per_epoch,
+            subsample_size=subsample_size,
+            augment_slide=augment_slide,
+            augment_ambiguous_bases=augment_ambiguous_bases,
+            rng=rng
+        )
+        self.encoder_batch_size = encoder_batch_size
+        self.encoder = dnabert.DnaBertEncoderModel(dnabert_base, subsamples=self.subsample_size > 0)
+
+    def generate_batch(self, rng: np.random.Generator):
+        _, entries = self.sampler.random_entries(
+            self.batch_size, max(1, self.subsample_size), rng)
+        sequences = self.sampler.sequences(entries, rng)
+        if self.kmer > 1:
+            sequences = dna.encode_kmers(
+                sequences, # type: ignore
+                self.kmer,
+                not self.sampler.augment_ambiguous_bases) # type: ignore
+        if self.subsample_size == 0:
+            sequences = np.squeeze(sequences, axis=1)
+        sequences = self.encoder.predict(sequences, batch_size=self.encoder_batch_size, verbose=False)
+        return sequences, sequences
+
+
+class OtuSequenceEmbeddingGenerator(OtuSequenceGenerator):
+    def __init__(
+        self,
+        samples: Iterable[tuple[fasta.FastaDb, OtuSampleDb]],
+        dnabert_base: dnabert.DnaBertModel,
+        use_presence_absence: bool = False,
+        batch_size: int = 16,
+        batches_per_epoch: int = 100,
+        subsample_size: int = 0,
+        augment_slide: bool = True,
+        augment_ambiguous_bases: bool = True,
+        encoder_batch_size: int = 1,
+        rng: np.random.Generator = np.random.default_rng()
+    ):
+        super().__init__(
+            samples=samples,
+            sequence_length=dnabert_base.sequence_length,
+            kmer=dnabert_base.kmer,
+            use_presence_absence=use_presence_absence,
             batch_size=batch_size,
             batches_per_epoch=batches_per_epoch,
             subsample_size=subsample_size,

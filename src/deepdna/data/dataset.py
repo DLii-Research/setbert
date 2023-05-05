@@ -77,6 +77,12 @@ class Dataset:
         """
         yield from self.find_with_suffix([".fastq.db"], split)
 
+    def otu_dbs(self, split: Split) -> Generator[Path, None, None]:
+        """
+        Find all taxonomy files in a directory.
+        """
+        yield from self.find_with_suffix([".otu.db"], split)
+
     def taxonomies(self, split: Split) -> Generator[Path, None, None]:
         """
         Find all taxonomy files in a directory.
