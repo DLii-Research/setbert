@@ -1,6 +1,7 @@
-from dnadb.taxonomy import TAXON_LEVEL_NAMES, TaxonomyHierarchy
+from dnadb.taxonomy import TaxonomyHierarchy
 import json
 import tensorflow as tf
+import tf_utilities as tfu
 from typing import cast
 
 from .custom_model import ModelWrapper, CustomModel
@@ -128,10 +129,10 @@ class DnaBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
     """
     The DNABERT encoder/embedding model architecture
     """
-    def __init__(self, base: DnaBertModel, subsamples: bool = False, **kwargs):
+    def __init__(self, base: DnaBertModel, chunk_size: int, **kwargs):
         super().__init__(**kwargs)
         self.base = base
-        self.subsamples = subsamples
+        self.chunk_size = chunk_size
         self.model = self.build_model()
 
     def build_model(self):
@@ -139,17 +140,19 @@ class DnaBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
         y = tf.keras.layers.Lambda(lambda x: x + 1)(y)
         y = self.base(y)
         token, _ = layers.SplitClassToken()(y)
-        model = tf.keras.Model(x, token)
-        if self.subsamples:
-            y = x = tf.keras.layers.Input((None, *self.base.input_shape[1:]), dtype=tf.int32)
-            y = tf.keras.layers.TimeDistributed(model)(y)
-            model = tf.keras.Model(x, y)
-        return model
+        return tf.keras.Model(x, token)
+
+    def encode(self, batch: tf.Tensor, chunk_size: int|None = None):
+        chunk_size = chunk_size if chunk_size is not None else self.chunk_size
+        original_shape = tf.shape(batch)
+        batch = tf.reshape(batch, (-1, original_shape[-1]))
+        result = tfu.subbatching.subbatch_predict(self, batch, chunk_size)
+        return tf.reshape(result, tf.concat((original_shape[:-1], (-1,)), axis=0))
 
     def get_config(self):
         return super().get_config() | {
             "base": self.base,
-            "subsamples": self.subsamples
+            "chunk_size": self.chunk_size
         }
 
 

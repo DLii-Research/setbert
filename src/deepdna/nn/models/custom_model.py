@@ -12,9 +12,10 @@ class TypedModel(tf.keras.Model, Generic[Params, ReturnType]):
     def __call__(
         self,
         inputs: Params,
-        training: bool|None = None
+        training: bool|None = None,
+        **kwargs
     ) -> ReturnType:
-        return cast(ReturnType, super().__call__(inputs, training=training))
+        return cast(ReturnType, super().__call__(inputs, training=training, **kwargs))
 
 
 ModelType = TypeVar("ModelType", bound=tf.keras.models.Model)

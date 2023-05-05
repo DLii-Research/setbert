@@ -12,7 +12,7 @@ from deepdna.data import otu
 from deepdna.data.dataset import Dataset
 from deepdna.nn import losses
 from deepdna.nn.callbacks import LearningRateStepScheduler
-from deepdna.nn.data_generators import OtuSequenceEmbeddingGenerator
+from deepdna.nn.data_generators import OtuSequenceGenerator
 from deepdna.nn.models import dnabert, setbert, load_model
 from deepdna.nn.utils import optimizer
 
@@ -29,6 +29,7 @@ def define_arguments(cli: tfs.CliArgumentFactory):
     cli.argument("dataset_paths", type=str, nargs='+')
 
     # Architecture Settings
+    cli.argument("--encode-chunk-size", type=int, default=256)
     cli.argument("--subsample-size", type=int, default=1000)
     cli.argument("--embed-dim", type=int, default=64)
     cli.argument("--stack", type=int, default=8)
@@ -46,32 +47,33 @@ def define_arguments(cli: tfs.CliArgumentFactory):
     cli.argument("--init-lr", type=float, default=0.0)
     cli.argument("--warmup-steps", type=int, default=None)
     cli.argument("--loss-fn", choices=["chamfer", "setloss"], default="chamfer")
+    cli.argument("--use-presence-absence", action="store_true", default=False)
 
     # Logging
     cli.argument("--save-to", type=str, default=None)
     cli.argument("--log-artifact", type=str, default=None)
 
 
-def load_pretrained_dnabert_model(config) -> dnabert.DnaBertModel:
-    pretrain_path = tfs.artifact(config, "dnabert")
-    return load_model(pretrain_path, dnabert.DnaBertPretrainModel).base
-
-
 def load_datasets(
     config,
     dnabert_base: dnabert.DnaBertModel
-) -> tuple[OtuSequenceEmbeddingGenerator, OtuSequenceEmbeddingGenerator|None]:
+) -> tuple[OtuSequenceGenerator, OtuSequenceGenerator|None]:
+
+    if config.use_presence_absence:
+        print("Using presence absence...")
 
     datasets = [Dataset(path) for path in config.dataset_paths]
     test_datasets = [d for d in datasets if d.has_split(Dataset.Split.Test)]
 
     generator_args = dict(
-        dnabert_base = dnabert_base,
+        sequence_length = dnabert_base.sequence_length,
+        kmer = dnabert_base.kmer,
+        use_presence_absence = config.use_presence_absence,
         batch_size = config.batch_size,
         subsample_size = config.subsample_size,
     )
 
-    train = OtuSequenceEmbeddingGenerator(
+    train = OtuSequenceGenerator(
         zip(
             chain(*(map(fasta.FastaDb, d.fasta_dbs(Dataset.Split.Train)) for d in datasets)),
             chain(*(map(otu.OtuSampleDb, d.otu_dbs(Dataset.Split.Train)) for d in datasets))
@@ -82,7 +84,7 @@ def load_datasets(
     )
     validation = None
     if len(test_datasets):
-        validation = OtuSequenceEmbeddingGenerator(
+        validation = OtuSequenceGenerator(
             zip(
                 chain(*(map(fasta.FastaDb, d.fasta_dbs(Dataset.Split.Test))
                     for d in datasets if d.has_split(Dataset.Split.Test))),
@@ -96,9 +98,10 @@ def load_datasets(
     return (train, validation)
 
 
-def create_model(config):
+def create_model(config, dnabert_base: dnabert.DnaBertModel):
     print("Creating model...")
     base = setbert.SetBertModel(
+        dnabert_encoder=dnabert.DnaBertEncoderModel(dnabert_base, config.encode_chunk_size),
         embed_dim=config.embed_dim,
         max_set_len=config.subsample_size,
         stack=config.stack,
@@ -147,10 +150,14 @@ def create_callbacks(config):
 
 
 def train(config, model_path):
+
+    # Download the DNABERT artifact
+    pretrain_path = tfs.artifact(config, "dnabert")
+
     with tfs.strategy(config).scope(): # type: ignore
 
         # Load the pretrained DNABERT model
-        dnabert_base = load_pretrained_dnabert_model(config)
+        dnabert_base = load_model(pretrain_path, dnabert.DnaBertPretrainModel).base
 
         # Load the dataset
         train_data, val_data = load_datasets(config, dnabert_base)
@@ -159,7 +166,7 @@ def train(config, model_path):
         if model_path is not None:
             model = load_model(model_path)
         else:
-            model = create_model(config)
+            model = create_model(config, dnabert_base)
 
         # Create any collbacks we may need
         callbacks = create_callbacks(config)
