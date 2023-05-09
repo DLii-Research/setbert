@@ -11,11 +11,13 @@ class BatchGenerator(tf.keras.utils.Sequence):
         self,
         batch_size: int,
         batches_per_epoch: int,
+        shuffle: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ):
         super().__init__()
         self.batch_size = batch_size
         self.batches_per_epoch = batches_per_epoch
+        self.shuffle_after_epoch = shuffle
         self.rng = rng
         self.shuffle()
 
@@ -43,7 +45,8 @@ class BatchGenerator(tf.keras.utils.Sequence):
         """
         Shuffle the dataset after each epoch
         """
-        self.shuffle()
+        if self.shuffle_after_epoch:
+            self.shuffle()
 
     def __getitem__(self, batch_index):
         rng = self.random_generator_for_batch(batch_index)
@@ -145,9 +148,10 @@ class OtuSequenceGenerator(BatchGenerator):
         augment_ambiguous_bases: bool = True,
         use_kmer_inputs: bool = True,
         use_kmer_labels: bool = True,
+        shuffle: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ):
-        super().__init__(batch_size, batches_per_epoch, rng)
+        super().__init__(batch_size, batches_per_epoch, shuffle, rng)
         if subsample_size > 0:
             to_keep: list[tuple[fasta.FastaDb, OtuSampleDb]] = []
             for sample, otus in samples:
@@ -268,9 +272,10 @@ class SequenceGenerator(BatchGenerator):
         augment_ambiguous_bases: bool = True,
         use_kmer_inputs: bool = True,
         use_kmer_labels: bool = True,
+        shuffle: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ):
-        super().__init__(batch_size, batches_per_epoch, rng)
+        super().__init__(batch_size, batches_per_epoch, shuffle, rng)
         if subsample_size > 0:
             to_keep: list[fasta.FastaDb|fastq.FastqDb] = []
             for sample in samples:
@@ -327,9 +332,10 @@ class SampleGenerator(BatchGenerator):
         augment_ambiguous_bases: bool = True,
         use_kmer_inputs: bool = True,
         use_kmer_labels: bool = True,
+        shuffle: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ):
-        super().__init__(batch_size, batches_per_epoch, rng)
+        super().__init__(batch_size, batches_per_epoch, shuffle, rng)
         self.sampler = SequenceSampler(
             samples,
             sequence_length,
@@ -376,9 +382,10 @@ class FastaTaxonomyGenerator(BatchGenerator):
         augment_slide: bool = True,
         augment_ambiguous_bases: bool = True,
         labels_as_dict: bool = True,
+        shuffle: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ):
-        super().__init__(batch_size, batches_per_epoch, rng)
+        super().__init__(batch_size, batches_per_epoch, shuffle, rng)
         fasta_dbs, taxonomy_dbs = zip(*samples)
         self.sampler = SequenceSampler(
             cast(tuple[fasta.FastaDb], fasta_dbs),
@@ -429,28 +436,30 @@ class SequenceEmbeddingGenerator(SequenceGenerator):
     def __init__(
         self,
         samples: Iterable[fasta.FastaDb|fastq.FastqDb],
-        dnabert_base: dnabert.DnaBertModel,
+        dnabert_encoder: dnabert.DnaBertEncoderModel,
         batch_size: int = 16,
         batches_per_epoch: int = 100,
         subsample_size: int = 0,
         augment_slide: bool = True,
         augment_ambiguous_bases: bool = True,
         encoder_batch_size: int = 1,
+        shuffle: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ):
         super().__init__(
             samples=samples,
-            sequence_length=dnabert_base.sequence_length,
-            kmer=dnabert_base.kmer,
+            sequence_length=dnabert_encoder.base.sequence_length,
+            kmer=dnabert_encoder.base.kmer,
             batch_size=batch_size,
             batches_per_epoch=batches_per_epoch,
             subsample_size=subsample_size,
             augment_slide=augment_slide,
             augment_ambiguous_bases=augment_ambiguous_bases,
+            shuffle=shuffle,
             rng=rng
         )
         self.encoder_batch_size = encoder_batch_size
-        self.encoder = dnabert.DnaBertEncoderModel(dnabert_base, subsamples=self.subsample_size > 0)
+        self.encoder = dnabert_encoder
 
     def generate_batch(self, rng: np.random.Generator):
         _, entries = self.sampler.random_entries(
@@ -471,7 +480,7 @@ class OtuSequenceEmbeddingGenerator(OtuSequenceGenerator):
     def __init__(
         self,
         samples: Iterable[tuple[fasta.FastaDb, OtuSampleDb]],
-        dnabert_base: dnabert.DnaBertModel,
+        dnabert_encoder: dnabert.DnaBertEncoderModel,
         use_presence_absence: bool = False,
         batch_size: int = 16,
         batches_per_epoch: int = 100,
@@ -479,22 +488,24 @@ class OtuSequenceEmbeddingGenerator(OtuSequenceGenerator):
         augment_slide: bool = True,
         augment_ambiguous_bases: bool = True,
         encoder_batch_size: int = 1,
+        shuffle: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ):
         super().__init__(
             samples=samples,
-            sequence_length=dnabert_base.sequence_length,
-            kmer=dnabert_base.kmer,
+            sequence_length=dnabert_encoder.base.sequence_length,
+            kmer=dnabert_encoder.base.kmer,
             use_presence_absence=use_presence_absence,
             batch_size=batch_size,
             batches_per_epoch=batches_per_epoch,
             subsample_size=subsample_size,
             augment_slide=augment_slide,
             augment_ambiguous_bases=augment_ambiguous_bases,
+            shuffle=shuffle,
             rng=rng
         )
         self.encoder_batch_size = encoder_batch_size
-        self.encoder = dnabert.DnaBertEncoderModel(dnabert_base, subsamples=self.subsample_size > 0)
+        self.encoder = dnabert_encoder
 
     def generate_batch(self, rng: np.random.Generator):
         _, entries = self.sampler.random_entries(
