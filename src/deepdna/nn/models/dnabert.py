@@ -1,4 +1,4 @@
-from dnadb.taxonomy import TaxonomyHierarchy
+# from dnadb.taxonomy import TaxonomyHierarchy
 import json
 import tensorflow as tf
 import tf_utilities as tfu
@@ -156,55 +156,55 @@ class DnaBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
         }
 
 
-@CustomObject
-class DnaBertTaxonomyModel(ModelWrapper, CustomModel[tf.Tensor, layers.TaxonomyOutputDict]):
-    def __init__(
-        self,
-        base: DnaBertModel,
-        hierarchy: TaxonomyHierarchy,
-        use_top_down_hierarchy: bool = False,
-        **kwargs
-    ):
-        super().__init__(**kwargs)
-        self.base = base
-        self.hierarchy = hierarchy
-        self.use_top_down_hierarchy = use_top_down_hierarchy
-        if self.use_top_down_hierarchy:
-            self.hierarchy_block = layers.TaxonomyHierarchyBlock.from_hierarchy(
-                self.hierarchy,
-                output_logits=False)
-        else:
-            self.hierarchy_block = layers.TaxonomyBlock.from_hierarchy(self.hierarchy)
-        self.model = self.build_model()
+# @CustomObject
+# class DnaBertTaxonomyModel(ModelWrapper, CustomModel[tf.Tensor, layers.TaxonomyOutputDict]):
+#     def __init__(
+#         self,
+#         base: DnaBertModel,
+#         hierarchy: TaxonomyHierarchy,
+#         use_top_down_hierarchy: bool = False,
+#         **kwargs
+#     ):
+#         super().__init__(**kwargs)
+#         self.base = base
+#         self.hierarchy = hierarchy
+#         self.use_top_down_hierarchy = use_top_down_hierarchy
+#         if self.use_top_down_hierarchy:
+#             self.hierarchy_block = layers.TaxonomyHierarchyBlock.from_hierarchy(
+#                 self.hierarchy,
+#                 output_logits=False)
+#         else:
+#             self.hierarchy_block = layers.TaxonomyBlock.from_hierarchy(self.hierarchy)
+#         self.model = self.build_model()
 
-    def build_model(self):
-        y = x = tf.keras.layers.Input(self.base.input_shape[1:], dtype=self.base.input.dtype)
-        y = self.base(y)
-        y, _ = layers.SplitClassToken()(y)
-        y = self.hierarchy_block(y)
-        return tf.keras.Model(x, y)
+#     def build_model(self):
+#         y = x = tf.keras.layers.Input(self.base.input_shape[1:], dtype=self.base.input.dtype)
+#         y = self.base(y)
+#         y, _ = layers.SplitClassToken()(y)
+#         y = self.hierarchy_block(y)
+#         return tf.keras.Model(x, y)
 
-    def compile(self, **kwargs):
-        defaults = {
-            "loss": TaxonCategoricalCrossentropy(from_logits=False),
-            "metrics": []
-        }
-        kwargs = defaults | kwargs
-        kwargs["metrics"].append(TaxonCategoricalAccuracy(name="accuracy"))
-        return super().compile(**kwargs)
+#     def compile(self, **kwargs):
+#         defaults = {
+#             "loss": TaxonCategoricalCrossentropy(from_logits=False),
+#             "metrics": []
+#         }
+#         kwargs = defaults | kwargs
+#         kwargs["metrics"].append(TaxonCategoricalAccuracy(name="accuracy"))
+#         return super().compile(**kwargs)
 
-    def get_config(self):
-        return super().get_config() | {
-            "base": self.base,
-            "hierarchy": json.dumps(self.hierarchy.to_json()),
-            "use_top_down_hierarchy": self.use_top_down_hierarchy
-        }
+#     def get_config(self):
+#         return super().get_config() | {
+#             "base": self.base,
+#             "hierarchy": json.dumps(self.hierarchy.to_json()),
+#             "use_top_down_hierarchy": self.use_top_down_hierarchy
+#         }
 
-    @classmethod
-    def from_config(cls, config):
-        config["hierarchy"] = TaxonomyHierarchy.from_json(json.loads(config["hierarchy"]))
-        return super().from_config(config)
+#     @classmethod
+#     def from_config(cls, config):
+#         config["hierarchy"] = TaxonomyHierarchy.from_json(json.loads(config["hierarchy"]))
+#         return super().from_config(config)
 
-    @property
-    def output_names(self):
-        return self.hierarchy_block.output_names
+#     @property
+#     def output_names(self):
+#         return self.hierarchy_block.output_names

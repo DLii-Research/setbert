@@ -723,135 +723,135 @@ class SampleSet(TypedLayer[[tf.Tensor], tf.Tensor]):
 
 # DNA Related Layers -------------------------------------------------------------------------------
 
-TaxonomyOutputDict = TypedDict(
-    "TaxonomyOutputDict",
-    {
-        "kingdom": tf.Tensor,
-        "phylum": tf.Tensor,
-        "class": tf.Tensor,
-        "order": tf.Tensor,
-        "family": tf.Tensor,
-        "genus": tf.Tensor,
-        "species": tf.Tensor
-    },
-    total=False)
+# TaxonomyOutputDict = TypedDict(
+#     "TaxonomyOutputDict",
+#     {
+#         "kingdom": tf.Tensor,
+#         "phylum": tf.Tensor,
+#         "class": tf.Tensor,
+#         "order": tf.Tensor,
+#         "family": tf.Tensor,
+#         "genus": tf.Tensor,
+#         "species": tf.Tensor
+#     },
+#     total=False)
 
 
-@CustomObject
-class TaxonomyBlock(TypedLayer[[tf.Tensor], TaxonomyOutputDict]):
-    @classmethod
-    def from_hierarchy(cls, hierarchy: taxonomy.TaxonomyHierarchy):
-        taxon_counts_by_level = tuple(
-            tuple(len(t.children) for t in taxon_map.values()) for taxon_map in hierarchy.taxon_maps
-        )
-        return cls(taxon_counts_by_level)
+# @CustomObject
+# class TaxonomyBlock(TypedLayer[[tf.Tensor], TaxonomyOutputDict]):
+#     @classmethod
+#     def from_hierarchy(cls, hierarchy: taxonomy.TaxonomyHierarchy):
+#         taxon_counts_by_level = tuple(
+#             tuple(len(t.children) for t in taxon_map.values()) for taxon_map in hierarchy.taxon_maps
+#         )
+#         return cls(taxon_counts_by_level)
 
-    def __init__(self, taxon_counts_by_level: tuple[tuple[int, ...], ...], **kwargs):
-        super().__init__(**kwargs)
-        self.taxon_counts_by_level = taxon_counts_by_level
-        self.output_names = list(map(
-            str.lower,
-            taxonomy.TAXON_LEVEL_NAMES[:len(taxon_counts_by_level)]))
-        self.dense_layers = [
-            tf.keras.layers.Dense(len(taxon_counts), activation="softmax")
-            for taxon_counts in self.taxon_counts_by_level]
+#     def __init__(self, taxon_counts_by_level: tuple[tuple[int, ...], ...], **kwargs):
+#         super().__init__(**kwargs)
+#         self.taxon_counts_by_level = taxon_counts_by_level
+#         self.output_names = list(map(
+#             str.lower,
+#             taxonomy.TAXON_LEVEL_NAMES[:len(taxon_counts_by_level)]))
+#         self.dense_layers = [
+#             tf.keras.layers.Dense(len(taxon_counts), activation="softmax")
+#             for taxon_counts in self.taxon_counts_by_level]
 
-    def call(self, inputs: tf.Tensor) -> dict[str, tf.Tensor]:
-        """
-        Outputs
-        """
-        prev = inputs
-        out_layer = []
-        for dense in self.dense_layers:
-            out = dense(prev)
-            out_layer.append(out)
-            in_help = out_layer.copy()
-            in_help.append(prev)
-            prev = tf.concat(in_help, axis=1)
-        return { name.lower(): output for name, output in zip(self.output_names, out_layer) }
+#     def call(self, inputs: tf.Tensor) -> dict[str, tf.Tensor]:
+#         """
+#         Outputs
+#         """
+#         prev = inputs
+#         out_layer = []
+#         for dense in self.dense_layers:
+#             out = dense(prev)
+#             out_layer.append(out)
+#             in_help = out_layer.copy()
+#             in_help.append(prev)
+#             prev = tf.concat(in_help, axis=1)
+#         return { name.lower(): output for name, output in zip(self.output_names, out_layer) }
 
-    def compute_output_shape(self, input_shape):
-        return tuple(
-            (input_shape[:-1], len(taxon_map))
-            for taxon_map in self.hierarchy.taxon_maps[:self.depth])
+#     def compute_output_shape(self, input_shape):
+#         return tuple(
+#             (input_shape[:-1], len(taxon_map))
+#             for taxon_map in self.hierarchy.taxon_maps[:self.depth])
 
-    def get_config(self):
-        return super().get_config() | {
-            "taxon_counts_by_level": self.taxon_counts_by_level
-        }
+#     def get_config(self):
+#         return super().get_config() | {
+#             "taxon_counts_by_level": self.taxon_counts_by_level
+#         }
 
 
-@CustomObject
-class TaxonomyHierarchyBlock(TypedLayer[[tf.Tensor], TaxonomyOutputDict]):
-    @classmethod
-    def from_hierarchy(
-        cls,
-        hierarchy: taxonomy.TaxonomyHierarchy,
-        output_logits: bool = False,
-    ):
-        taxon_counts_by_level = tuple(
-            tuple(len(t.children) for t in taxon_map.values()) for taxon_map in hierarchy.taxon_maps
-        )
-        return cls(taxon_counts_by_level, output_logits)
+# @CustomObject
+# class TaxonomyHierarchyBlock(TypedLayer[[tf.Tensor], TaxonomyOutputDict]):
+#     @classmethod
+#     def from_hierarchy(
+#         cls,
+#         hierarchy: taxonomy.TaxonomyHierarchy,
+#         output_logits: bool = False,
+#     ):
+#         taxon_counts_by_level = tuple(
+#             tuple(len(t.children) for t in taxon_map.values()) for taxon_map in hierarchy.taxon_maps
+#         )
+#         return cls(taxon_counts_by_level, output_logits)
 
-    def __init__(
-        self,
-        taxon_counts_by_level: tuple[tuple[int, ...], ...],
-        output_logits: bool,
-        **kwargs
-    ):
-        super().__init__(**kwargs)
-        self.taxon_counts_by_level = taxon_counts_by_level
-        self.output_logits = output_logits
-        self.output_names = list(map(
-            str.lower,
-            taxonomy.TAXON_LEVEL_NAMES[:len(taxon_counts_by_level)]))
-        self.dense_layers = [
-            tf.keras.layers.Dense(len(taxon_counts))
-            for taxon_counts in self.taxon_counts_by_level]
+#     def __init__(
+#         self,
+#         taxon_counts_by_level: tuple[tuple[int, ...], ...],
+#         output_logits: bool,
+#         **kwargs
+#     ):
+#         super().__init__(**kwargs)
+#         self.taxon_counts_by_level = taxon_counts_by_level
+#         self.output_logits = output_logits
+#         self.output_names = list(map(
+#             str.lower,
+#             taxonomy.TAXON_LEVEL_NAMES[:len(taxon_counts_by_level)]))
+#         self.dense_layers = [
+#             tf.keras.layers.Dense(len(taxon_counts))
+#             for taxon_counts in self.taxon_counts_by_level]
 
-    def call(self, inputs: tf.Tensor) -> dict[str, tf.Tensor]:
-        """
-        Outputs
-        """
-        outputs = [self.dense_layers[0](inputs)]
-        for dense, taxon_counts in zip(self.dense_layers[1:], self.taxon_counts_by_level):
-            # Use previous output to gate the next layer
-            gate_indices = [j for j, count in enumerate(taxon_counts) for _ in range(count)]
-            gate = tf.gather(outputs[-1], gate_indices, axis=-1)
-            outputs.append(dense(inputs) + gate)
-        if not self.output_logits:
-            outputs = map(tf.nn.softmax, outputs)
-        return { name: output for name, output in zip(self.output_names, outputs) }
+#     def call(self, inputs: tf.Tensor) -> dict[str, tf.Tensor]:
+#         """
+#         Outputs
+#         """
+#         outputs = [self.dense_layers[0](inputs)]
+#         for dense, taxon_counts in zip(self.dense_layers[1:], self.taxon_counts_by_level):
+#             # Use previous output to gate the next layer
+#             gate_indices = [j for j, count in enumerate(taxon_counts) for _ in range(count)]
+#             gate = tf.gather(outputs[-1], gate_indices, axis=-1)
+#             outputs.append(dense(inputs) + gate)
+#         if not self.output_logits:
+#             outputs = map(tf.nn.softmax, outputs)
+#         return { name: output for name, output in zip(self.output_names, outputs) }
 
-    def compute_output_shape(self, input_shape):
-        return tuple(
-            (input_shape[:-1], len(taxon_map))
-            for taxon_map in self.hierarchy.taxon_maps[:self.depth])
+#     def compute_output_shape(self, input_shape):
+#         return tuple(
+#             (input_shape[:-1], len(taxon_map))
+#             for taxon_map in self.hierarchy.taxon_maps[:self.depth])
 
-    def get_config(self):
-        return super().get_config() | {
-            "taxon_counts_by_level": self.taxon_counts_by_level
-        }
+#     def get_config(self):
+#         return super().get_config() | {
+#             "taxon_counts_by_level": self.taxon_counts_by_level
+#         }
 
-# Utility Layers -----------------------------------------------------------------------------------
+# # Utility Layers -----------------------------------------------------------------------------------
 
-class MaskDebug(TypedLayer[[tf.Tensor], tf.Tensor]):
-    def __init__(self, mask_callback: Callable|None = None, **kwargs):
-        super().__init__(**kwargs)
-        self.mask_callback = mask_callback
-        self.supports_masking = True
+# class MaskDebug(TypedLayer[[tf.Tensor], tf.Tensor]):
+#     def __init__(self, mask_callback: Callable|None = None, **kwargs):
+#         super().__init__(**kwargs)
+#         self.mask_callback = mask_callback
+#         self.supports_masking = True
 
-    def call(self, inputs: tf.Tensor) -> tf.Tensor:
-        return inputs + 0 # type: ignore
+#     def call(self, inputs: tf.Tensor) -> tf.Tensor:
+#         return inputs + 0 # type: ignore
 
-    def compute_mask(self, inputs, mask=None):
-        if self.mask_callback is None:
-            if mask is None:
-                tf.print("No mask")
-                return mask
-            tf.print("Mask Shape", tf.shape(mask))
-            tf.print("Mask:", mask)
-            return mask
-        self.mask_callback(inputs, mask)
-        return mask
+#     def compute_mask(self, inputs, mask=None):
+#         if self.mask_callback is None:
+#             if mask is None:
+#                 tf.print("No mask")
+#                 return mask
+#             tf.print("Mask Shape", tf.shape(mask))
+#             tf.print("Mask:", mask)
+#             return mask
+#         self.mask_callback(inputs, mask)
+#         return mask
