@@ -2,6 +2,12 @@ import tensorflow as tf
 from .registry import CustomObject
 
 @CustomObject
+def clip_accuracy(y_true, y_pred):
+    accuracy_a = tf.keras.metrics.sparse_categorical_accuracy(y_true, y_pred)
+    accuracy_b = tf.keras.metrics.sparse_categorical_accuracy(y_true, tf.transpose(y_pred))
+    return (accuracy_a + accuracy_b) / 2.0
+
+@CustomObject
 class TaxonCategoricalAccuracy(tf.keras.metrics.SparseCategoricalAccuracy):
     def update_state(self, y_true, y_pred, sample_weight=None):
         # Flatten to make computation easier
