@@ -6,6 +6,7 @@ class Split(enum.Flag):
     Train = enum.auto()
     Test = enum.auto()
 
+# !deprecated
 class Dataset:
 
     Split = Split
