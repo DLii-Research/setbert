@@ -1,10 +1,12 @@
-from dnadb import dna, fasta, fastq, taxonomy
+from dnadb import dna, taxonomy
+from dnadb.sample import FastaSample, SampleInterface
 import numpy as np
+import numpy.typing as npt
 import tensorflow as tf
-from typing import cast, Iterable
+from typing import Any, cast, Generic, Iterable, Optional, TypeVar
 
-from ..data.otu import OtuSampleDb, OtuSampleEntry
-from .models import dnabert
+# from ..data.otu import OtuSampleDb, OtuSampleEntry
+from ..data.samplers import SequenceSampler, SampleSampler
 
 class BatchGenerator(tf.keras.utils.Sequence):
     def __init__(
@@ -56,467 +58,253 @@ class BatchGenerator(tf.keras.utils.Sequence):
         return self.batches_per_epoch
 
 
-class OtuSampler:
-    def __init__(
-        self,
-        samples: Iterable[tuple[fasta.FastaDb, OtuSampleDb]],
-        sequence_length: int,
-        use_presence_absence: bool = False,
-        augment_slide: bool = True,
-        augment_ambiguous_bases: bool = True
-    ):
-        self.samples = tuple(samples)
-        self.sequence_length = sequence_length
-        self.use_presence_absence = use_presence_absence
-        self.augment_slide = augment_slide
-        self.augment_ambiguous_bases = augment_ambiguous_bases
-
-    def augment_sequence_slide(self, sequence: str, rng: np.random.Generator):
-        """
-        Trim and optionally slide the sequence randomly.
-        """
-        offset = rng.integers(len(sequence) - self.sequence_length + 1) if self.augment_slide else 0
-        return sequence[offset:offset+self.sequence_length]
-
-    def sequences(
-        self,
-        sample_entries: list[list[fasta.FastaEntry]],
-        rng: np.random.Generator
-    ):
-        """
-        Get the encoded + augmented sequences from the sample entries.
-        """
-        if self.augment_slide:
-            slide_offsets = rng.uniform(size=(len(sample_entries), len(sample_entries[0])))
-        else:
-            slide_offsets = np.zeros((len(sample_entries), len(sample_entries[0])))
-        output_shape = (len(sample_entries), len(sample_entries[0]), self.sequence_length)
-        sequences = np.empty(output_shape, dtype=np.uint8)
-        for i, sample in enumerate(sample_entries):
-            for j, entry in enumerate(sample):
-                sequence = entry.sequence.encode()
-                offset = int((len(sequence) - self.sequence_length + 1)*slide_offsets[i,j])
-                sequences[i,j] = np.frombuffer(
-                    sequence, np.uint8, offset=offset, count=self.sequence_length)
-        sequences = dna.encode(sequences)
-        if self.augment_ambiguous_bases:
-            sequences = dna.replace_ambiguous_encoded_bases(sequences, rng)
-        return sequences.astype(np.int32)
-
-    def random_entries(self, num_samples: int, subsample_size: int, rng: np.random.Generator):
-        """
-        Draw samples at random and return random subsamples from each one.
-        """
-        # Draw some random FASTA/OTU files
-        file_indices = rng.choice(len(self.samples), num_samples)
-        files = tuple(self.samples[i] for i in file_indices)
-
-        sample_offsets = rng.uniform(size=num_samples)
-        sample_indices = (sample_offsets*[len(f[1]) for f in files]).astype(np.int32)
-
-        fasta_entries = []
-        for (fasta_db, otu_db), sample_index in zip(files, sample_indices):
-            entry: OtuSampleEntry = otu_db[sample_index]
-            p = None if self.use_presence_absence else (entry.otu_counts / np.sum(entry.otu_counts))
-            otu_ids, counts = np.unique(
-                rng.choice(entry.otu_indices, subsample_size, replace=True, p=p),
-                return_counts=True
-            )
-
-            fasta_subsample = []
-            for otu_id, count in zip(otu_ids, counts):
-                sequence_id = otu_db.sequence_id(otu_id)
-                fasta_subsample += [fasta_db[sequence_id]]*count
-            fasta_entries.append(fasta_subsample)
-        return (file_indices, sample_indices), fasta_entries
-
-
-class OtuSequenceGenerator(BatchGenerator):
-    """
-    Generate sequences from given FASTA files.
-    """
-    def __init__(
-        self,
-        samples: Iterable[tuple[fasta.FastaDb, OtuSampleDb]],
-        sequence_length: int,
-        kmer: int = 1,
-        use_presence_absence: bool = False,
-        batch_size: int = 32,
-        batches_per_epoch: int = 100,
-        subsample_size: int = 0,
-        augment_slide: bool = True,
-        augment_ambiguous_bases: bool = True,
-        use_kmer_inputs: bool = True,
-        use_kmer_labels: bool = True,
-        shuffle: bool = True,
-        rng: np.random.Generator = np.random.default_rng()
-    ):
-        super().__init__(batch_size, batches_per_epoch, shuffle, rng)
-        if subsample_size > 0:
-            to_keep: list[tuple[fasta.FastaDb, OtuSampleDb]] = []
-            for sample, otus in samples:
-                if len(sample) < subsample_size:
-                    print(f"WARNING: Skipping sample {sample.path.name} because it has too few sequences ({len(sample)} < {subsample_size})")
-                    continue
-                to_keep.append((sample, otus))
-            samples = to_keep
-        self.sampler = OtuSampler(
-            samples,
-            sequence_length,
-            use_presence_absence=use_presence_absence,
-            augment_slide=augment_slide,
-            augment_ambiguous_bases=augment_ambiguous_bases)
-        self.kmer = kmer
-        self.subsample_size = subsample_size
-        self.use_kmer_inputs = use_kmer_inputs
-        self.use_kmer_labels = use_kmer_labels
-
-    def generate_batch(self, rng: np.random.Generator):
-        _, entries = self.sampler.random_entries(
-            self.batch_size, max(1, self.subsample_size), rng)
-        sequences = self.sampler.sequences(entries, rng)
-        if self.subsample_size == 0:
-            sequences = np.squeeze(sequences, axis=1)
-        x = y = sequences
-        if self.kmer > 1:
-            kmers = dna.encode_kmers(x, self.kmer, not self.sampler.augment_ambiguous_bases) # type: ignore
-            x = kmers if self.use_kmer_inputs else x
-            y = kmers if self.use_kmer_labels else y
-        return x, y
-
-    @property
-    def samples(self):
-        return self.sampler.samples
-
-    @property
-    def sequence_length(self):
-        return self.sampler.sequence_length
-
-
-class SequenceSampler:
-    def __init__(
-        self,
-        samples: Iterable[fasta.FastaDb|fastq.FastqDb],
-        sequence_length: int,
-        augment_slide: bool = True,
-        augment_ambiguous_bases: bool = True
-    ):
-        self.samples = tuple(samples)
-        self.sequence_length = sequence_length
-        self.augment_slide = augment_slide
-        self.augment_ambiguous_bases = augment_ambiguous_bases
-
-    def augment_sequence_slide(self, sequence: str, rng: np.random.Generator):
-        """
-        Trim and optionally slide the sequence randomly.
-        """
-        offset = rng.integers(len(sequence) - self.sequence_length + 1) if self.augment_slide else 0
-        return sequence[offset:offset+self.sequence_length]
-
-    def sequences(
-        self,
-        sample_entries: list[list[fasta.FastaEntry]],
-        rng: np.random.Generator
-    ):
-        """
-        Get the encoded + augmented sequences from the sample entries.
-        """
-        if self.augment_slide:
-            slide_offsets = rng.uniform(size=(len(sample_entries), len(sample_entries[0])))
-        else:
-            slide_offsets = np.zeros((len(sample_entries), len(sample_entries[0])))
-        output_shape = (len(sample_entries), len(sample_entries[0]), self.sequence_length)
-        sequences = np.empty(output_shape, dtype=np.uint8)
-        for i, sample in enumerate(sample_entries):
-            for j, entry in enumerate(sample):
-                sequence = entry.sequence.encode()
-                offset = int((len(sequence) - self.sequence_length + 1)*slide_offsets[i,j])
-                sequences[i,j] = np.frombuffer(
-                    sequence, np.uint8, offset=offset, count=self.sequence_length)
-        sequences = dna.encode(sequences)
-        if self.augment_ambiguous_bases:
-            sequences = dna.replace_ambiguous_encoded_bases(sequences, rng)
-        return sequences.astype(np.int32)
-
-    def random_entries(self, num_samples: int, subsample_size: int, rng: np.random.Generator):
-        """
-        Draw samples at random and return random subsamples from each one.
-        """
-        # Draw some random samples
-        sample_indices = rng.choice(len(self.samples), num_samples)
-        samples = tuple(self.samples[i] for i in sample_indices)
-
-        # Draw random sequence indices for each sample
-        sequence_offsets = rng.uniform(size=(len(sample_indices), subsample_size))
-        sequence_indices = (sequence_offsets*[[len(s)] for s in samples]).astype(np.int32)
-
-        fasta_entries = []
-        for sample, indices in zip(samples, sequence_indices):
-            fasta_entries.append([sample[i] for i in indices])
-        return sample_indices, fasta_entries
-
+def _encode_sequences(sequences: npt.NDArray[np.str_], augment_ambiguous_bases: bool, rng: np.random.Generator) -> npt.NDArray[np.uint8]:
+    result = []
+    for subsample in sequences:
+        result.append([])
+        for sequence in subsample:
+            result[-1].append(dna.encode_sequence(sequence))
+    result = np.array(result, dtype=np.uint8)
+    if augment_ambiguous_bases:
+        result = dna.replace_ambiguous_encoded_bases(result, rng)
+    return result
 
 class SequenceGenerator(BatchGenerator):
-    """
-    Generate sequences from given FASTA files.
-    """
     def __init__(
         self,
-        samples: Iterable[fasta.FastaDb|fastq.FastqDb],
+        samples: Iterable[SampleInterface],
         sequence_length: int,
         kmer: int = 1,
-        batch_size: int = 32,
-        batches_per_epoch: int = 100,
-        subsample_size: int = 0,
+        subsample_size: int|None = None,
         augment_slide: bool = True,
         augment_ambiguous_bases: bool = True,
         use_kmer_inputs: bool = True,
         use_kmer_labels: bool = True,
+        batch_size: int = 32,
+        batches_per_epoch: int = 100,
         shuffle: bool = True,
+        balance: bool = False,
         rng: np.random.Generator = np.random.default_rng()
     ):
-        super().__init__(batch_size, batches_per_epoch, shuffle, rng)
-        if subsample_size > 0:
-            to_keep: list[fasta.FastaDb|fastq.FastqDb] = []
-            for sample in samples:
-                if len(sample) < subsample_size:
-                    print(f"WARNING: Skipping sample {sample.path.name} because it has too few sequences ({len(sample)} < {subsample_size})")
-                    continue
-                to_keep.append(sample)
-            samples = to_keep
-        self.sampler = SequenceSampler(
-            samples,
-            sequence_length,
-            augment_slide=augment_slide,
-            augment_ambiguous_bases=augment_ambiguous_bases)
+        super().__init__(
+            batch_size=batch_size,
+            batches_per_epoch=batches_per_epoch,
+            shuffle=shuffle,
+            rng=rng
+        )
+        self.sample_sampler = SampleSampler(samples)
+        self.sequence_sampler = SequenceSampler(sequence_length, augment_slide)
         self.kmer = kmer
         self.subsample_size = subsample_size
+        self.augment_ambiguous_bases = augment_ambiguous_bases
         self.use_kmer_inputs = use_kmer_inputs
         self.use_kmer_labels = use_kmer_labels
+        self.balance = balance
 
-    def generate_batch(self, rng: np.random.Generator):
-        _, entries = self.sampler.random_entries(
-            self.batch_size, max(1, self.subsample_size), rng)
-        sequences = self.sampler.sequences(entries, rng)
-        if self.subsample_size == 0:
+    @property
+    def sequence_length(self) -> int:
+        return self.sequence_sampler.sequence_length
+
+    def generate_batch(
+        self,
+        rng: np.random.Generator
+    ) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32]]:
+        subsample_size = self.subsample_size or 1
+        sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
+        samples = self.sample_sampler.sample(self.batch_size, self.balance, rng)
+        for i, sample in enumerate(samples):
+            sequences[i] = tuple(self.sequence_sampler.sample(sample, subsample_size, rng))
+        sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
+        if self.subsample_size is None:
             sequences = np.squeeze(sequences, axis=1)
-        x = y = sequences
+        x = y = sequences.astype(np.int32)
         if self.kmer > 1:
-            kmers = dna.encode_kmers(x, self.kmer, not self.sampler.augment_ambiguous_bases) # type: ignore
+            kmers = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases).astype(np.int32) # type: ignore
             x = kmers if self.use_kmer_inputs else x
             y = kmers if self.use_kmer_labels else y
         return x, y
 
-    @property
-    def samples(self):
-        return self.sampler.samples
-
-    @property
-    def sequence_length(self):
-        return self.sampler.sequence_length
-
-
 class SampleGenerator(BatchGenerator):
-    """
-    Generate sequences from given FASTA files with the sample FASTA as the label.
-    """
     def __init__(
         self,
-        samples: Iterable[fasta.FastaDb],
+        samples: Iterable[SampleInterface],
         sequence_length: int,
         kmer: int = 1,
-        batch_size: int = 32,
-        batches_per_epoch: int = 100,
-        subsample_size: int = 0,
+        subsample_size: int|None = None,
         augment_slide: bool = True,
         augment_ambiguous_bases: bool = True,
-        use_kmer_inputs: bool = True,
-        use_kmer_labels: bool = True,
+        batch_size: int = 32,
+        batches_per_epoch: int = 100,
+        class_weights: Optional[npt.ArrayLike] = None,
         shuffle: bool = True,
+        balance: bool = False,
         rng: np.random.Generator = np.random.default_rng()
     ):
-        super().__init__(batch_size, batches_per_epoch, shuffle, rng)
-        self.sampler = SequenceSampler(
-            samples,
-            sequence_length,
-            augment_slide=augment_slide,
-            augment_ambiguous_bases=augment_ambiguous_bases)
+        super().__init__(
+            batch_size=batch_size,
+            batches_per_epoch=batches_per_epoch,
+            shuffle=shuffle,
+            rng=rng
+        )
+        self.sample_sampler = SampleSampler(samples, p=class_weights)
+        self.sequence_sampler = SequenceSampler(sequence_length, augment_slide)
         self.kmer = kmer
         self.subsample_size = subsample_size
-        self.use_kmer_inputs = use_kmer_inputs
-        self.use_kmer_labels = use_kmer_labels
+        self.augment_ambiguous_bases = augment_ambiguous_bases
+        self.balance = balance
 
-    def generate_batch(self, rng: np.random.Generator):
-        sample_indices, entries = self.sampler.random_entries(
-            self.batch_size, max(1, self.subsample_size), rng)
-        sequences = self.sampler.sequences(entries, rng)
-        if self.subsample_size == 0:
-            sequences = np.squeeze(sequences, axis=1)
+    @property
+    def sequence_length(self) -> int:
+        return self.sequence_sampler.sequence_length
+
+    def generate_batch(
+        self,
+        rng: np.random.Generator
+    ) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32]]:
+        subsample_size = self.subsample_size or 1
+        sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
+        sample_ids = np.empty(self.batch_size, dtype=np.int32)
+        samples = self.sample_sampler.sample_with_ids(self.batch_size, self.balance, rng)
+        for i, (sample_id, sample) in enumerate(samples):
+            sequences[i] = tuple(self.sequence_sampler.sample(sample, subsample_size, rng))
+            sample_ids[i] = sample_id
+        sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
+        if self.subsample_size is None:
+            sequences = np.squeeze(sequences, axis=1) # type: ignore
         if self.kmer > 1:
-            sequences = dna.encode_kmers(
-                sequences, self.kmer, not self.sampler.augment_ambiguous_bases) # type: ignore
-        return sequences, sample_indices
+            sequences = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases)
+        return sequences.astype(np.int32), sample_ids
 
-    @property
-    def samples(self):
-        return self.sampler.samples
-
-    @property
-    def sequence_length(self):
-        return self.sampler.sequence_length
-
-
-class FastaTaxonomyGenerator(BatchGenerator):
-    """
-    Generate sequences from given FASTA files.
-    """
+class SequenceTaxonomyGenerator(BatchGenerator):
     def __init__(
         self,
-        samples: Iterable[tuple[fasta.FastaDb, taxonomy.TaxonomyDb]],
+        fasta_taxonomy_pairs: Iterable[tuple[FastaSample, taxonomy.TaxonomyDb]],
         sequence_length: int,
         kmer: int = 1,
         taxonomy_depth: int = 6,
+        taxonomy_hierarchy: Optional[taxonomy.TaxonomyHierarchy] = None,
+        subsample_size: int|None = None,
         batch_size: int = 32,
         batches_per_epoch: int = 100,
-        subsample_size: int = 0,
         augment_slide: bool = True,
         augment_ambiguous_bases: bool = True,
-        labels_as_dict: bool = True,
+        labels_as_dict: bool = False,
+        include_missing: bool = True,
+        balance: bool = False,
         shuffle: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ):
-        super().__init__(batch_size, batches_per_epoch, shuffle, rng)
-        fasta_dbs, taxonomy_dbs = zip(*samples)
-        self.sampler = SequenceSampler(
-            cast(tuple[fasta.FastaDb], fasta_dbs),
-            sequence_length,
-            augment_slide=augment_slide,
-            augment_ambiguous_bases=augment_ambiguous_bases)
-        self.taxonomy_dbs = cast(tuple[taxonomy.TaxonomyDb, ...], taxonomy_dbs)
+        super().__init__(
+            batch_size=batch_size,
+            batches_per_epoch=batches_per_epoch,
+            shuffle=shuffle,
+            rng=rng
+        )
+        fasta_samples, taxonomy_dbs = zip(*fasta_taxonomy_pairs)
+        self.sample_sampler = SampleSampler(cast(tuple[FastaSample, ...], fasta_samples))
+        self.sequence_sampler = SequenceSampler(sequence_length, augment_slide)
+        self.taxonomy_dbs: tuple[taxonomy.TaxonomyDb, ...] = cast(Any, taxonomy_dbs)
         self.kmer = kmer
         self.subsample_size = subsample_size
-        self.hierarchy = taxonomy.TaxonomyHierarchy.merge(
-            (db.hierarchy for db in self.taxonomy_dbs))
-        self.hierarchy.depth = taxonomy_depth
+        self.augment_ambiguous_bases = augment_ambiguous_bases
         self.labels_as_dict = labels_as_dict
+        self.include_missing = include_missing
+        self.balance = balance
+        if taxonomy_hierarchy is None:
+            self.hierarchy = taxonomy.TaxonomyHierarchy.from_dbs(self.taxonomy_dbs, taxonomy_depth)
+        else:
+            self.hierarchy = taxonomy_hierarchy
 
-    def generate_batch(self, rng: np.random.Generator):
-        sample_indices, entries = self.sampler.random_entries(
-            self.batch_size, max(1, self.subsample_size), rng)
-        sequences = self.sampler.sequences(entries, rng)
-        labels = np.full((*sequences.shape[:-1], self.hierarchy.depth),  -1,  dtype=np.int32)
-        for i, (sample_index, sample_entries) in enumerate(zip(sample_indices, entries)):
-            taxonomy_db: taxonomy.TaxonomyDb = self.taxonomy_dbs[sample_index]
-            for j, entry in enumerate(sample_entries):
-                labels[i, j] = self.hierarchy.identifier_map.encode_entry(
-                    taxonomy_db[entry.identifier])
-        labels = labels.transpose((2, 0, 1))
-        if self.subsample_size == 0:
-            sequences = np.squeeze(sequences, axis=1)
+    @property
+    def sequence_length(self) -> int:
+        return self.sequence_sampler.sequence_length
+
+    def generate_batch(
+        self,
+        rng: np.random.Generator
+    ) -> tuple[
+        npt.NDArray[np.int32],
+        dict[str, npt.NDArray[np.int32]]|tuple[npt.NDArray[np.int32], ...]
+    ]:
+        subsample_size = self.subsample_size or 1
+        sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
+        labels = np.full((*sequences.shape, self.hierarchy.depth), -1,  dtype=np.int32)
+        samples = self.sample_sampler.sample_with_ids(self.batch_size, self.balance, rng)
+        for i, (sample_index, sample) in enumerate(samples):
+            taxonomy_db = self.taxonomy_dbs[sample_index]
+            fasta_ids, sequences[i] = zip(*self.sequence_sampler.sample_with_ids(
+                sample, subsample_size, rng))
+            for j, fasta_id in enumerate(fasta_ids):
+                labels[i,j] = self.hierarchy.tokenize(
+                    taxonomy_db.fasta_id_to_label(fasta_id),
+                    pad=True,
+                    include_missing=self.include_missing)
+        labels = labels.transpose(((2, 0, 1)))
+        sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
+        if self.subsample_size is None:
+            sequences = np.squeeze(sequences, axis=1) # type: ignore
             labels = np.squeeze(labels, axis=2)
         if self.kmer > 1:
-            sequences = dna.encode_kmers(
-                sequences, self.kmer, not self.sampler.augment_ambiguous_bases) # type: ignore
+            sequences = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases)
         if self.labels_as_dict:
-            return sequences, {
-                name.lower(): l for name, l in zip(taxonomy.TAXON_LEVEL_NAMES, labels)
-            }
-        return sequences, tuple(labels)
-
-    @property
-    def samples(self):
-        return self.sampler.samples
-
-    @property
-    def sequence_length(self):
-        return self.sampler.sequence_length
+            labels = dict(zip(map(str.lower, taxonomy.RANKS), labels))
+        else:
+            labels = tuple(labels)
+        return sequences.astype(np.int32), labels
 
 
-class SequenceEmbeddingGenerator(SequenceGenerator):
+_T = TypeVar("_T")
+class SampleValuePairGenerator(SampleGenerator, Generic[_T]):
     def __init__(
         self,
-        samples: Iterable[fasta.FastaDb|fastq.FastqDb],
-        dnabert_encoder: dnabert.DnaBertEncoderModel,
-        batch_size: int = 16,
-        batches_per_epoch: int = 100,
-        subsample_size: int = 0,
+        samples: Iterable[SampleInterface],
+        sample_values: dict[str, _T],
+        sequence_length: int,
+        kmer: int = 1,
+        subsample_size: int|None = None,
         augment_slide: bool = True,
         augment_ambiguous_bases: bool = True,
-        encoder_batch_size: int = 1,
+        batch_size: int = 32,
+        batches_per_epoch: int = 100,
+        class_weights: Optional[npt.ArrayLike] = None,
         shuffle: bool = True,
+        balance: bool = False,
         rng: np.random.Generator = np.random.default_rng()
     ):
         super().__init__(
             samples=samples,
-            sequence_length=dnabert_encoder.base.sequence_length,
-            kmer=dnabert_encoder.base.kmer,
-            batch_size=batch_size,
-            batches_per_epoch=batches_per_epoch,
+            sequence_length=sequence_length,
+            kmer=kmer,
             subsample_size=subsample_size,
             augment_slide=augment_slide,
             augment_ambiguous_bases=augment_ambiguous_bases,
-            shuffle=shuffle,
-            rng=rng
-        )
-        self.encoder_batch_size = encoder_batch_size
-        self.encoder = dnabert_encoder
-
-    def generate_batch(self, rng: np.random.Generator):
-        _, entries = self.sampler.random_entries(
-            self.batch_size, max(1, self.subsample_size), rng)
-        sequences = self.sampler.sequences(entries, rng)
-        if self.kmer > 1:
-            sequences = dna.encode_kmers(
-                sequences, # type: ignore
-                self.kmer,
-                not self.sampler.augment_ambiguous_bases) # type: ignore
-        if self.subsample_size == 0:
-            sequences = np.squeeze(sequences, axis=1)
-        sequences = self.encoder.predict(sequences, batch_size=self.encoder_batch_size, verbose=False)
-        return sequences, sequences
-
-
-class OtuSequenceEmbeddingGenerator(OtuSequenceGenerator):
-    def __init__(
-        self,
-        samples: Iterable[tuple[fasta.FastaDb, OtuSampleDb]],
-        dnabert_encoder: dnabert.DnaBertEncoderModel,
-        use_presence_absence: bool = False,
-        batch_size: int = 16,
-        batches_per_epoch: int = 100,
-        subsample_size: int = 0,
-        augment_slide: bool = True,
-        augment_ambiguous_bases: bool = True,
-        encoder_batch_size: int = 1,
-        shuffle: bool = True,
-        rng: np.random.Generator = np.random.default_rng()
-    ):
-        super().__init__(
-            samples=samples,
-            sequence_length=dnabert_encoder.base.sequence_length,
-            kmer=dnabert_encoder.base.kmer,
-            use_presence_absence=use_presence_absence,
             batch_size=batch_size,
             batches_per_epoch=batches_per_epoch,
-            subsample_size=subsample_size,
-            augment_slide=augment_slide,
-            augment_ambiguous_bases=augment_ambiguous_bases,
+            class_weights=class_weights,
             shuffle=shuffle,
+            balance=balance,
             rng=rng
         )
-        self.encoder_batch_size = encoder_batch_size
-        self.encoder = dnabert_encoder
+        self.sample_values = sample_values
 
     def generate_batch(self, rng: np.random.Generator):
-        _, entries = self.sampler.random_entries(
-            self.batch_size, max(1, self.subsample_size), rng)
-        sequences = self.sampler.sequences(entries, rng)
+        subsample_size = self.subsample_size or 1
+        sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
+        sample_values = []
+        samples = self.sample_sampler.sample(self.batch_size, self.balance, rng)
+        for i, sample in enumerate(samples):
+            sequences[i] = tuple(self.sequence_sampler.sample(sample, subsample_size, rng))
+            sample_values.append(self.sample_values[sample.name])
+        sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
+        if self.subsample_size is None:
+            sequences = np.squeeze(sequences, axis=1) # type: ignore
         if self.kmer > 1:
-            sequences = dna.encode_kmers(
-                sequences, # type: ignore
-                self.kmer,
-                not self.sampler.augment_ambiguous_bases) # type: ignore
-        if self.subsample_size == 0:
-            sequences = np.squeeze(sequences, axis=1)
-        sequences = self.encoder.predict(sequences, batch_size=self.encoder_batch_size, verbose=False)
-        return sequences, sequences
+            sequences = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases)
+        return (sequences.astype(np.int32), np.array(sample_values, dtype=np.float32)), None
+
+
+_T = TypeVar("_T")
+class SampleValueTargetGenerator(SampleValuePairGenerator[_T]):
+    def generate_batch(self, rng: np.random.Generator):
+        (x, y), _ = super().generate_batch(rng)
+        return x, y
