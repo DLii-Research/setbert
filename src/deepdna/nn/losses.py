@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.spatial.distance import cdist
 import tensorflow as tf
 from .registry import CustomObject
 
@@ -59,7 +60,7 @@ def chamfer_distance(
 
 
 @CustomObject
-class SortedLoss(tf.keras.losses.Loss):
+class FastSortedLoss(tf.keras.losses.Loss):
     def __init__(self, loss_fn = tf.losses.mean_squared_error, **kwargs):
         super().__init__(**kwargs)
         self.loss_fn = loss_fn
@@ -70,6 +71,55 @@ class SortedLoss(tf.keras.losses.Loss):
         try:
             return self.loss_fn(y_true, y_pred, sample_weight=sample_weight)
         except TypeError:
+            return self.loss_fn(y_true, y_pred)
+
+
+@CustomObject
+class SortedLoss(FastSortedLoss):
+    def _step_body(self, i, y_true, y_pred, total_loss):
+        y_true_sorted = tf.sort(tf.roll(y_true, shift=i, axis=2), axis=1)
+        y_pred_sorted = tf.sort(tf.roll(y_pred, shift=i, axis=2), axis=1)
+        loss = self.loss_fn(y_true_sorted, y_pred_sorted)
+        return [i+1, y_true, y_pred, total_loss + loss]
+
+    def call(self, y_true, y_pred):
+        embed_dim = tf.shape(y_true)[2]
+        i = 0
+        total_loss = tf.zeros(tf.shape(y_true)[:-1], dtype=tf.float32)
+        (i, _, _, total_loss) = tf.while_loop(
+            lambda i, *_: i < embed_dim,
+            self._step_body,
+            loop_vars=[i, y_true, y_pred, total_loss])
+        return total_loss / tf.cast(embed_dim, tf.float32)
+
+
+@CustomObject
+class GreedyEmd(tf.keras.losses.Loss):
+    def __init__(self, loss_fn=tf.keras.losses.mean_squared_error, **kwargs):
+        super().__init__(**kwargs)
+        self.loss_fn = loss_fn
+
+    def _loss_np(self, y_true, y_pred):
+        sorted_indices = np.zeros(tf.shape(y_true)[:2]) # type: ignore
+        for batch_index, (a, b) in enumerate(zip(y_pred, y_true)):
+            visited_a, visited_b = set(), set()
+            distance = cdist(a, b).flatten()
+            indices = np.argsort(distance)
+            for i in indices:
+                from_index, to_index = i // 5, i % 5
+                if from_index in visited_a or to_index in visited_b:
+                    continue
+                sorted_indices[batch_index][len(visited_a)] += from_index
+                visited_a.add(from_index)
+                visited_b.add(to_index)
+        return sorted_indices
+
+    def call(self, y_true, y_pred, sample_weight=None):
+        indices = tf.py_function(self._loss_np, (y_true, y_pred), tf.int32)
+        y_pred = tf.gather(y_pred, indices, batch_dims=1)
+        try:
+            return self.loss_fn(y_true, y_pred, sample_weight)
+        except:
             return self.loss_fn(y_true, y_pred)
 
 
