@@ -3,6 +3,8 @@ import tensorflow as tf
 from typing import Any, cast, TypeVar
 
 from . import custom_model
+
+from . import clip
 from . import dnabert
 from . import setbert
 from . import utils
