@@ -29,7 +29,13 @@ class BatchGenerator(tf.keras.utils.Sequence):
         """
         raise NotImplementedError()
 
-    def random_generator_for_batch(self, batch_index):
+    def reduce_batch(self, batch):
+        """
+        Reduce the batch to the desired output
+        """
+        return batch
+
+    def rng_for_batch(self, batch_index):
         """
         Create a new random generator instance for a particular batch.
         """
@@ -50,9 +56,12 @@ class BatchGenerator(tf.keras.utils.Sequence):
         if self.shuffle_after_epoch:
             self.shuffle()
 
-    def __getitem__(self, batch_index):
-        rng = self.random_generator_for_batch(batch_index)
+    def get(self, batch_index):
+        rng = self.rng_for_batch(batch_index)
         return self.generate_batch(rng)
+
+    def __getitem__(self, batch_index):
+        return self.reduce_batch(self.get(batch_index))
 
     def __len__(self):
         return self.batches_per_epoch
@@ -108,12 +117,19 @@ class SequenceGenerator(BatchGenerator):
     def generate_batch(
         self,
         rng: np.random.Generator
-    ) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32]]:
+    ) -> tuple[
+        npt.NDArray[np.str_], # sample IDs
+        npt.NDArray[np.str_], # sequence IDs
+        npt.NDArray[np.int32], # sequences
+        npt.NDArray[np.int32] # sequences
+    ]:
         subsample_size = self.subsample_size or 1
         sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
-        samples = self.sample_sampler.sample(self.batch_size, self.balance, rng)
+        sample_ids, samples = self.sample_sampler.sample_with_ids(self.batch_size, self.balance, rng)
+        sequence_ids = np.empty((self.batch_size, subsample_size), dtype=str)
         for i, sample in enumerate(samples):
-            sequences[i] = tuple(self.sequence_sampler.sample(sample, subsample_size, rng))
+            sequence_info = tuple(self.sequence_sampler.sample_with_ids(sample, subsample_size, rng))
+            sequence_ids[i], sequences[i] = zip(*sequence_info)
         sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
         if self.subsample_size is None:
             sequences = np.squeeze(sequences, axis=1)
@@ -122,7 +138,11 @@ class SequenceGenerator(BatchGenerator):
             kmers = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases).astype(np.int32) # type: ignore
             x = kmers if self.use_kmer_inputs else x
             y = kmers if self.use_kmer_labels else y
-        return x, y
+        return sample_ids, sequence_ids, x, y
+
+    def reduce_batch(self, batch):
+        # remove sample IDs and sequence IDs
+        return batch[2:]
 
 class SampleGenerator(BatchGenerator):
     def __init__(
