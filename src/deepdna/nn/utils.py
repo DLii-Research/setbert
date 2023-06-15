@@ -19,3 +19,21 @@ def optimizer(name: str, **kwargs) -> Type[tf.keras.optimizers.Optimizer]:
     Get an optimizer instance by name with the given keyword arguments as the configuration.
     """
     return tf.keras.optimizers.get({"class_name": name, "config": {**kwargs}})
+
+
+class PostInit(type):
+    """
+    A metaclass that allows the implementation of `__post_init__(self)` to allow post-processing
+    after __init__ has been invoked.
+    """
+    def __init__(cls, name, bases, dct):
+        original_init = cls.__init__
+        def init(self, *args, **kwargs):
+            if type(self) is cls:
+                original_init(self, *args, **kwargs)
+                if hasattr(self, "__post_init__"):
+                    self.__post_init__()
+            else:
+                original_init(self, *args, **kwargs)
+        cls.__init__ = init
+        super().__init__(name, bases, dct)
