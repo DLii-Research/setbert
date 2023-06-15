@@ -36,7 +36,6 @@ class ModelWrapper(Generic[ModelType], metaclass=PostInit):
         self.initialize_model()
 
     def initialize_model(self):
-        print("Initializing model")
         self(self.input)
 
     def plot(

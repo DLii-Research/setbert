@@ -1,9 +1,7 @@
-import abc
 import tensorflow as tf
 from typing import Optional
-import warnings
 
-from .custom_model import ModelWrapper, CustomModel
+from .custom_model import CustomModel
 from ..metrics import contrastive_accuracy
 from ..losses import ContrastiveLoss
 from ..registry import CustomObject

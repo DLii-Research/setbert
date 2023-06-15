@@ -5,7 +5,6 @@ import numpy.typing as npt
 import tensorflow as tf
 from typing import Any, cast, Generic, Iterable, Optional, TypeVar
 
-# from ..data.otu import OtuSampleDb, OtuSampleEntry
 from ..data.samplers import SequenceSampler, SampleSampler
 
 class BatchGenerator(tf.keras.utils.Sequence):

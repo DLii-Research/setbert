@@ -1,7 +1,11 @@
 from dnadb import taxonomy
+import tensorflow as tf
 
 from .custom_model import ModelWrapper, CustomModel
 from .utils import encapsulate_model
+from ..losses import SparseCategoricalCrossentropyWithIgnoreClass
+from ..metrics import SparseCategoricalAccuracyWithIgnoreClass
+from ..registry import CustomObject
 
 @CustomObject
 class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel[tf.Tensor, tuple[tf.Tensor, ...]]):
@@ -37,7 +41,6 @@ class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel[tf.Tensor, tupl
         for i in range(self.hierarchy.depth):
             dense = tf.keras.layers.Dense(
                 self.hierarchy.taxon_counts[i] + int(self.include_missing),
-                activation="softmax",
                 name=taxonomy.RANKS[i].lower())
             outputs.append(dense(y))
         return tf.keras.Model(x, outputs)
@@ -75,10 +78,10 @@ class BertaxTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
         x, y = encapsulate_model(self.base)
         prev = y
         outputs = []
-        for i in range(hierarchy.depth):
+        for i in range(self.hierarchy.depth):
             rank = taxonomy.RANKS[i].lower()
             out = tf.keras.layers.Dense(
-                hierarchy.taxon_counts[i] + int(self.include_missing),
+                self.hierarchy.taxon_counts[i] + int(self.include_missing),
                 name=rank)(prev)
             outputs.append(out)
             in_help = outputs.copy()
@@ -98,13 +101,17 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
         taxon_counts_by_level[0]
 
         x, y = encapsulate_model(self.base)
-        outputs = [tf.keras.layers.Dense(hierarchy.taxon_counts[0] + int(self.include_missing), name=f"{taxonomy.RANKS[0].lower()}")(y)]
+        outputs = [
+            tf.keras.layers.Dense(
+                self.hierarchy.taxon_counts[0] + int(self.include_missing),
+                name=f"{taxonomy.RANKS[0].lower()}")(y)
+        ]
         for i, taxon_counts in enumerate(taxon_counts_by_level, start=1):
             # Use previous output to gate the next layer
             gate_indices = [j for j, count in enumerate(taxon_counts) for _ in range(count)]
             gate = tf.gather(outputs[-1], gate_indices, axis=-1)
             gated_output = tf.keras.layers.Dense(
-                hierarchy.taxon_counts[i] + 1,
+                self.hierarchy.taxon_counts[i] + 1,
                 name=f"{taxonomy.RANKS[i].lower()}_projection"
             )(y)
             outputs.append(tf.keras.layers.Add(name=f"{taxonomy.RANKS[i].lower()}")([gated_output, gate]))

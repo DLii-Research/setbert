@@ -14,7 +14,7 @@ def tfcast(value: TensorflowObject, dtype: tf.DType, name: str|None = None) -> T
     return cast(TensorflowObject, tf.cast(value, dtype, name))
 
 
-def optimizer(name: str, **kwargs) -> Type[tf.keras.optimizers.Optimizer]:
+def optimizer(name: str, **kwargs) -> tf.keras.optimizers.Optimizer:
     """
     Get an optimizer instance by name with the given keyword arguments as the configuration.
     """

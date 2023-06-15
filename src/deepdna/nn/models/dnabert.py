@@ -1,4 +1,3 @@
-import json
 import tensorflow as tf
 import tf_utilities as tfu
 from typing import cast
@@ -8,7 +7,7 @@ from .. import layers
 from ..registry import CustomObject
 
 @CustomObject
-class DnaBertModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
+class DnaBertModel(ModelWrapper, tf.keras.Model):
     """
     The base DNABERT model definition.
     """
@@ -118,7 +117,7 @@ class DnaBertPretrainModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
 
 
 @CustomObject
-class DnaBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
+class DnaBertEncoderModel(ModelWrapper, tf.keras.Model):
     """
     The DNABERT encoder/embedding model architecture
     """
