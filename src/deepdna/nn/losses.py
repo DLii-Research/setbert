@@ -62,20 +62,6 @@ def chamfer_distance(
             tf.reduce_mean(input_tensor=minimum_square_distance_b_to_a, axis=-1))
 
 
-#! deprecated
-@CustomObject
-class ClipLoss(tf.keras.losses.Loss):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    def call(self, y_true, y_pred):
-        a = tf.keras.losses.sparse_categorical_crossentropy(
-            y_true, y_pred, from_logits=True)
-        b = tf.keras.losses.sparse_categorical_crossentropy(
-            y_true, tf.transpose(y_pred), from_logits=True)
-        return (a + b) / 2.0
-
-
 @CustomObject
 class ContrastiveLoss(tf.keras.losses.Loss):
     def __init__(self, **kwargs):
@@ -184,6 +170,7 @@ class GreedyEmd(tf.keras.losses.Loss):
         except:
             return self.loss_fn(y_true, y_pred)
 
+
 @CustomObject
 class SparseCategoricalCrossentropyWithIgnoreClass(tf.keras.losses.SparseCategoricalCrossentropy):
     def __init__(
@@ -204,15 +191,3 @@ class SparseCategoricalCrossentropyWithIgnoreClass(tf.keras.losses.SparseCategor
             y_true = tf.gather_nd(y_true, indices_to_keep)
             y_pred = tf.gather_nd(y_pred, indices_to_keep)
         return super().call(y_true, y_pred)
-
-
-# @CustomObject
-# class TaxonCategoricalCrossentropy(tf.keras.losses.SparseCategoricalCrossentropy):
-#     def __call__(self, y_true, y_pred, sample_weight=None):
-#         # Flatten to make computation easier
-#         y_true = tf.cast(tf.reshape(y_true, (-1,)), dtype=tf.int64)
-#         y_pred = tf.reshape(y_pred, (-1, tf.shape(y_pred)[-1]))
-#         indices = tf.where(tf.reshape(y_true, tf.shape(y_true)[:1]) != -1)
-#         masked_y_true = tf.gather_nd(y_true, indices)
-#         masked_y_pred = tf.gather_nd(y_pred, indices)
-#         return super().__call__(masked_y_true, masked_y_pred, sample_weight=sample_weight)
