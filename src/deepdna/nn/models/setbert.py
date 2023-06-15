@@ -28,8 +28,6 @@ class SetBertModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
         self.num_heads = num_heads
         self.num_induce = num_induce
         self.pre_layernorm = pre_layernorm
-        self.model = self.build_model()
-
         self.dnabert_encoder.trainable = False
 
     def build_model(self):
@@ -97,7 +95,6 @@ class SetBertPretrainModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
         super().__init__(**kwargs)
         self.base = base
         self.masking = layers.SetMask(self.base.embed_dim, self.base.max_set_len, mask_ratio)
-        self.model = self.build_model()
 
     def build_model(self):
         y = x = tf.keras.layers.Input((self.base.max_set_len, self.base.embed_dim))
@@ -106,15 +103,8 @@ class SetBertPretrainModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
         y = tf.keras.layers.Lambda(lambda x: x[0][:,1:x[1]+1,:])((y, num_masked))
         return tf.keras.Model(x, (num_masked, y))
 
-    def compile(self, **kwargs):
-        config = {
-            # Since the model is permutation-equivariant, we only need to
-            # ensure that the items that were masked are compared to the
-            # correct predictions. This can be done easily by sorting the
-            # elements before comparing.
-            "loss": SortedLoss(tf.keras.losses.mean_squared_error)
-        } | kwargs
-        return super().compile(**config)
+    def default_loss(self):
+        return SortedLoss(tf.keras.losses.mean_squared_error)
 
     def train_step(self, batch):
         x, _ = batch
@@ -187,7 +177,6 @@ class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
     def __init__(self, base: SetBertModel, **kwargs):
         super().__init__(**kwargs)
         self.base = base
-        self.model = self.build_model()
 
     def build_model(self):
         y = x = tf.keras.layers.Input(self.base.input_shape[1:])
@@ -202,7 +191,10 @@ class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
         training: bool|None = None,
         **kwargs
     ):
-        embeddings = tf.stop_gradient(self.base.dnabert_encoder.encode(inputs))
+        if tf.rank(inputs) == tf.rank(self.input_shape) + 1:
+            embeddings = tf.stop_gradient(self.base.dnabert_encoder.encode(inputs))
+        else:
+            embeddings = inputs
         result = super().call(embeddings, training=training, **kwargs)
         return (result[0], result[1:]) if return_attention_scores else result[0]
 

@@ -5,8 +5,10 @@ from typing import Any, cast, TypeVar
 from . import custom_model
 
 from . import clip
+from . import contrastive
 from . import dnabert
 from . import setbert
+from . import taxonomy
 from . import utils
 
 from .. import registry

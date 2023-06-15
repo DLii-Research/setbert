@@ -1,6 +1,8 @@
+import abc
 import tensorflow as tf
 from typing import cast, Generic, ParamSpec, TypeVar
-from . utils import accumulate_train_step
+from .utils import accumulate_train_step
+from ..utils import PostInit
 
 Params = TypeVar("Params")
 ReturnType = TypeVar("ReturnType")
@@ -19,15 +21,48 @@ class TypedModel(tf.keras.Model, Generic[Params, ReturnType]):
 
 
 ModelType = TypeVar("ModelType", bound=tf.keras.models.Model)
-class ModelWrapper(Generic[ModelType]):
+class ModelWrapper(Generic[ModelType], metaclass=PostInit):
     """
-    For models that wrap a model to add extended funcitonality,
+    For models that wrap a model to add extended functionality,
     this class ties the model wrapper's properties to the nested
     model's properties, along with a generic call method.
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model: ModelType
+
+    def __post_init__(self):
+        self.model = self.build_model()
+        self.initialize_model()
+
+    def initialize_model(self):
+        print("Initializing model")
+        self(self.input)
+
+    def plot(
+        self,
+        to_file='model.png',
+        show_shapes=False,
+        show_dtype=False,
+        show_layer_names=True,
+        rankdir='TB',
+        expand_nested=False,
+        dpi=96,
+        layer_range=None,
+        show_layer_activations=False
+    ):
+        return tf.keras.utils.plot_model(
+            model=self.model,
+            to_file=to_file,
+            show_shapes=show_shapes,
+            show_dtype=show_dtype,
+            show_layer_names=show_layer_names,
+            rankdir=rankdir,
+            expand_nested=expand_nested,
+            dpi=dpi,
+            layer_range=layer_range,
+            show_layer_activations=show_layer_activations
+        )
 
     @property
     def input_shape(self):
@@ -67,6 +102,9 @@ class ModelWrapper(Generic[ModelType]):
     def compute_output_shape(self, input_shape):
         return self.model.compute_output_shape(input_shape)
 
+    def summary(self):
+        return self.model.summary()
+
     def __setattr__(self, name, value):
         if name in ("inputs", "outputs", "input_names", "output_names"):
             return
@@ -74,11 +112,57 @@ class ModelWrapper(Generic[ModelType]):
 
 
 class CustomModel(TypedModel[Params, ReturnType], Generic[Params, ReturnType]):
+    """
+    Custom Keras model with extended functionality.
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.subbatching: bool = False # temporary for testing/debugging
         self.__subbatch_size = tf.constant(2**31 - 1, dtype=tf.int32) # max int32
+
+    def default_loss(self):
+        """
+        Build the default loss for the model.
+        """
+        return None
+
+    def default_metrics(self):
+        """
+        Build the default metrics for the model.
+        """
+        return []
+
+    def compile(
+        self,
+        optimizer="rmsprop",
+        loss="default",
+        metrics="default",
+        loss_weights=None,
+        weighted_metrics=None,
+        run_eagerly=None,
+        steps_per_execution=None,
+        jit_compile=None,
+        **kwargs
+    ):
+        """
+        Compile the model with supported defaults.
+        """
+        if loss == "default":
+            loss = self.default_loss()
+        if metrics == "default":
+            metrics = self.default_metrics()
+        return super().compile(
+            optimizer=optimizer,
+            loss=loss,
+            metrics=metrics,
+            loss_weights=loss_weights,
+            weighted_metrics=weighted_metrics,
+            run_eagerly=run_eagerly,
+            steps_per_execution=steps_per_execution,
+            jit_compile=jit_compile,
+            **kwargs
+        )
 
     @classmethod
     def from_config(cls, config):

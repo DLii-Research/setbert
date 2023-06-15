@@ -71,3 +71,25 @@ def accumulate_train_step(train_step, batch, subbatch_size, models):
         parallel_iterations=1)
 
     return variables, accum_grads
+
+
+def clone_inputs(model_or_inputs):
+    """
+    Clone the given inputs or the inputs from the given model.
+    """
+    if isinstance(model_or_inputs, tf.keras.Model):
+        model_or_inputs = clone_inputs(model_or_inputs.input)
+    if isinstance(model_or_inputs, dict):
+        return {name: clone_inputs(layer) for name, layer in model_or_inputs.items()}
+    if isinstance(model_or_inputs, (list, tuple)):
+        return [clone_inputs(x) for x in model_or_inputs]
+    return tf.keras.Input(type_spec=model_or_inputs.type_spec, name=model_or_inputs.name)
+
+
+def encapsulate_model(model: tf.keras.Model):
+    """
+    Encapsulate a model.
+    """
+    inputs = clone_inputs(model)
+    outputs = model(inputs)
+    return inputs, outputs
