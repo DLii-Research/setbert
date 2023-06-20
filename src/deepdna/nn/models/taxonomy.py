@@ -111,8 +111,27 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
             gate_indices = [j for j, count in enumerate(taxon_counts) for _ in range(count)]
             gate = tf.gather(outputs[-1], gate_indices, axis=-1)
             gated_output = tf.keras.layers.Dense(
-                self.hierarchy.taxon_counts[i] + 1,
+                self.hierarchy.taxon_counts[i] + int(self.include_missing),
                 name=f"{taxonomy.RANKS[i].lower()}_projection"
             )(y)
             outputs.append(tf.keras.layers.Add(name=f"{taxonomy.RANKS[i].lower()}")([gated_output, gate]))
+        return tf.keras.Model(x, outputs)
+
+
+@CustomObject
+class TopDownConcatTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
+    def build_model(self):
+        x, y = encapsulate_model(self.base)
+        outputs = [
+            tf.keras.layers.Dense(
+                self.hierarchy.taxon_counts[0] + int(self.include_missing),
+                name=f"{taxonomy.RANKS[0].lower()}_projection")(y)
+        ]
+        for i, count in enumerate(self.hierarchy.taxon_counts[1:], start=1):
+            concat = tf.keras.layers.Concatenate()((y, outputs[-1]))
+            output = tf.keras.layers.Dense(
+                count + int(self.include_missing),
+                name=f"{taxonomy.RANKS[i].lower()}_projection"
+            )(concat)
+            outputs.append(output)
         return tf.keras.Model(x, outputs)
