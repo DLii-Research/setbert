@@ -93,9 +93,9 @@ class BertaxTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
 @CustomObject
 class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
     def build_model(self):
+        assert self.include_missing is False, "TopDownTaxonomyClassificationModel does not currently support missing taxons."
         taxon_counts_by_level = []
         for i, taxons in enumerate(self.hierarchy.taxons[:-1]):
-            taxon_counts_by_level.append([1])
             for taxon in taxons:
                 taxon_counts_by_level[i].append(len(taxon.children))
         taxon_counts_by_level[0]
@@ -103,7 +103,7 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
         x, y = encapsulate_model(self.base)
         outputs = [
             tf.keras.layers.Dense(
-                self.hierarchy.taxon_counts[0] + int(self.include_missing),
+                self.hierarchy.taxon_counts[0],
                 name=f"{taxonomy.RANKS[0].lower()}")(y)
         ]
         for i, taxon_counts in enumerate(taxon_counts_by_level, start=1):
@@ -111,7 +111,7 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
             gate_indices = [j for j, count in enumerate(taxon_counts) for _ in range(count)]
             gate = tf.gather(outputs[-1], gate_indices, axis=-1)
             gated_output = tf.keras.layers.Dense(
-                self.hierarchy.taxon_counts[i] + int(self.include_missing),
+                self.hierarchy.taxon_counts[i],
                 name=f"{taxonomy.RANKS[i].lower()}_projection"
             )(y)
             outputs.append(tf.keras.layers.Add(name=f"{taxonomy.RANKS[i].lower()}")([gated_output, gate]))
