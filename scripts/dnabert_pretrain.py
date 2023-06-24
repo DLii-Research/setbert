@@ -1,5 +1,6 @@
 import bootstrap
-from dnadb import fasta
+from dnadb import fasta, fastq
+from itertools import chain
 from pathlib import Path
 import sys
 import tensorflow as tf
@@ -56,7 +57,10 @@ def load_datasets(config) -> tuple[SequenceGenerator, SequenceGenerator|None]:
         batch_size = config.batch_size,
     )
     train = SequenceGenerator(
-        map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Train)),
+        chain(
+            map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Train)),
+            map(fastq.FastqDb, dataset.fastq_dbs(Dataset.Split.Train)),
+        ),
         batches_per_epoch=config.batches_per_epoch,
         rng = tfs.rng(),
         **generator_args
@@ -64,7 +68,10 @@ def load_datasets(config) -> tuple[SequenceGenerator, SequenceGenerator|None]:
     validation = None
     if dataset.has_split(Dataset.Split.Test):
         validation = SequenceGenerator(
-            map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Test)),
+            chain(
+                map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Train)),
+                map(fastq.FastqDb, dataset.fastq_dbs(Dataset.Split.Train)),
+            ),
             batches_per_epoch=config.val_batches_per_epoch,
             rng = tfs.rng(),
             **generator_args
@@ -87,7 +94,6 @@ def create_model(config):
         mask_ratio=config.mask_ratio,
         min_len=config.min_len,
         max_len=config.max_len)
-
     model.compile(
         optimizer=optimizer(config.optimizer, learning_rate=config.lr),
         metrics=[

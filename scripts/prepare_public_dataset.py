@@ -4,6 +4,7 @@ Prepare a public taxonomic dataset such as Greengenes or Silva. This script will
 download the dataset automatically and create the appropriate files for use in
 Qiime as well as our own deep learning models.
 """
+from dataclasses import replace
 from dnadb.datasets import get_datasets
 from dnadb.datasets.dataset import InterfacesWithFasta, InterfacesWithTaxonomy, VersionedDataset
 from dnadb import fasta, taxonomy
@@ -44,10 +45,10 @@ def define_arguments(cli: tfs.CliArgumentFactory):
             help=f"Use the {dataset.NAME} dataset")
 
 
-def load_train_labels(config, datasets: list[FastaDataset], rng: np.random.Generator):
+def load_train_labels(config, datasets: list[FastaDataset], rng: np.random.Generator) -> set[str]:
     taxonomies = chain(*[dataset.taxonomies() for dataset in datasets])
-    labels = list(tqdm(taxonomy.unique_labels(taxonomies), desc="Loading unique labels", leave=False))
-    rng.shuffle(labels)
+    labels = list(set(tqdm((t.label for t in taxonomies), desc="Loading unique labels", leave=False)))
+    rng.shuffle(labels) # type: ignore
     return set(labels[int(config.test_split*len(labels)):])
 
 
@@ -82,7 +83,7 @@ def output_fasta(
             tax = hierarchy.reduce_entry(tax)
             fasta_out, tax_out = (test_fasta, test_tax) # type: ignore
         fasta_out.write(str(sequence) + '\n')
-        tax_out.write(str(tax) + '\n')
+        tax_out.write(str(tax).replace('__uncultured', '__') + '\n')
     for file in files:
         file.close()
     return [Path(file.name) for file in files]
@@ -112,7 +113,7 @@ def output_db(
             tax = hierarchy.reduce_entry(tax)
             fasta_out, tax_out = (test_fasta, test_tax) # type: ignore
         fasta_out.write_entry(sequence)
-        tax_out.write_entry(tax)
+        tax_out.write_entry(replace(tax, label=tax.label.replace('__uncultured', '__')))
 
 
 def main():
@@ -124,7 +125,9 @@ def main():
     for dataset in get_datasets():
         if (version := getattr(config, f"use_{dataset.NAME.lower()}")) is None:
             continue
-        datasets.append(cast(FastaDataset, dataset(version=version)))
+        datasets.append(cast(
+            FastaDataset,
+            dataset(version=version, force_download=config.force_download)))
 
     if len(datasets) == 0:
         print("No datasets selected. Provide at least one dataset (i.e. Silva, Greengenes, etc.)")
@@ -147,7 +150,8 @@ def main():
         train_labels = load_train_labels(config, datasets, rng)
 
         # Create the taxonomy hierarchy for training labels
-        hierarchy = taxonomy.TaxonomyHierarchy.from_labels(train_labels, depth=6)
+        hierarchy = taxonomy.TaxonomyHierarchy(depth=6)
+        hierarchy.add_taxonomies(train_labels)
 
         # Create the directories
         train_path = output_path

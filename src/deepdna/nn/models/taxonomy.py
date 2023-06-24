@@ -96,9 +96,9 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
         assert self.include_missing is False, "TopDownTaxonomyClassificationModel does not currently support missing taxons."
         taxon_counts_by_level = []
         for i, taxons in enumerate(self.hierarchy.taxons[:-1]):
+            taxon_counts_by_level.append([])
             for taxon in taxons:
                 taxon_counts_by_level[i].append(len(taxon.children))
-        taxon_counts_by_level[0]
 
         x, y = encapsulate_model(self.base)
         outputs = [
@@ -125,13 +125,13 @@ class TopDownConcatTaxonomyClassificationModel(NaiveTaxonomyClassificationModel)
         outputs = [
             tf.keras.layers.Dense(
                 self.hierarchy.taxon_counts[0] + int(self.include_missing),
-                name=f"{taxonomy.RANKS[0].lower()}_projection")(y)
+                name=f"{taxonomy.RANKS[0].lower()}")(y)
         ]
         for i, count in enumerate(self.hierarchy.taxon_counts[1:], start=1):
             concat = tf.keras.layers.Concatenate()((y, outputs[-1]))
             output = tf.keras.layers.Dense(
                 count + int(self.include_missing),
-                name=f"{taxonomy.RANKS[i].lower()}_projection"
+                name=f"{taxonomy.RANKS[i].lower()}"
             )(concat)
             outputs.append(output)
         return tf.keras.Model(x, outputs)

@@ -1,5 +1,6 @@
 from dnadb import fasta
 from itertools import chain
+import numpy as np
 from pathlib import Path
 import tensorflow as tf
 import tf_utilities.scripting as tfs
@@ -48,10 +49,23 @@ def define_arguments(cli: tfs.CliArgumentFactory):
     cli.argument("--warmup-steps", type=int, default=None)
     cli.argument("--loss-fn", choices=["chamfer", "setloss"], default="chamfer")
     cli.argument("--use-presence-absence", action="store_true", default=False)
+    cli.argument("--validation-mode", type=str, choices=["weak", "strong"], default="weak")
 
     # Logging
     cli.argument("--save-to", type=str, default=None)
     cli.argument("--log-artifact", type=str, default=None)
+
+
+class ValidationDataGenerator(tf.keras.utils.Sequence):
+    def __init__(self, batches):
+        super().__init__()
+        self.batches = batches
+
+    def __len__(self):
+        return len(self.batches)
+
+    def __getitem__(self, idx):
+        return self.batches[idx]
 
 
 def load_datasets(
@@ -83,7 +97,21 @@ def load_datasets(
         **generator_args
     )
     validation = None
-    if len(test_datasets):
+    if config.validation_mode == "weak":
+        print("Using weak validation")
+        # Weak Validation. Create a set of random subsamples to use as validation
+        validation = OtuSequenceGenerator(
+            zip(
+                chain(*(map(fasta.FastaDb, d.fasta_dbs(Dataset.Split.Train)) for d in datasets)),
+                chain(*(map(otu.OtuSampleDb, d.otu_dbs(Dataset.Split.Train)) for d in datasets))
+            ),
+            batches_per_epoch=config.val_batches_per_epoch,
+            shuffle=False,
+            rng = tfs.rng(),
+            **generator_args
+        )
+    elif len(test_datasets) > 0:
+        print("Using strong validation")
         validation = OtuSequenceGenerator(
             zip(
                 chain(*(map(fasta.FastaDb, d.fasta_dbs(Dataset.Split.Test))
@@ -95,6 +123,8 @@ def load_datasets(
             rng = tfs.rng(),
             **generator_args
         )
+    else:
+        print("Warning: No validation method available.")
     return (train, validation)
 
 

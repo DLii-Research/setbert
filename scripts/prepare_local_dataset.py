@@ -21,9 +21,10 @@ def define_arguments(cli: tfs.CliArgumentFactory):
     cli.use_rng()
     cli.argument("output_path", help="The path where the files will be written")
     cli.argument("data_files", nargs='+', help="Paths to FASTA/FASTQ files")
-    cli.argument("--test-split", type=float, default=0.2, help="The factor of the number of samples to use for testing")
+    cli.argument("--test-split", type=float, default=0.0, help="The factor of the number of samples to use for testing")
     cli.argument("--num-splits", type=int, default=1, help=f"The number of data splits to create")
-    cli.argument("--min-length", type=int, default=0, help="The minimum length of a sequence to include")
+    cli.argument("--min-sequence-length", type=int, default=0, help="The minimum length of a sequence to include")
+    cli.argument("--min-sample-length", type=int, default=0, help="The minimum length of a sample to include")
     processing = cli.parser.add_argument_group("Processing Steps")
     processing.add_argument("--clean-sequences", default=False, action="store_true", help="Clean the sequences by removing any unknown characters")
     output_types = cli.parser.add_argument_group("Output Formats")
@@ -137,7 +138,7 @@ def process_fasta_files(
         entries, num_dropped, num_sequences = read_entries(
             fasta_file.name,
             fasta.entries(fasta_file),
-            config.min_length,
+            config.min_sequence_length,
             config.clean_sequences)
         dropped_sequences.append(num_dropped)
         total_sequences.append(num_sequences)
@@ -166,7 +167,7 @@ def process_fastq_files(
         entries, num_dropped, num_sequences = read_entries(
             fastq_file.name,
             fastq.entries(fastq_file),
-            config.min_length,
+            config.min_sequence_length,
             clean_sequences=False)
         dropped_sequences.append(num_dropped)
         total_sequences.append(num_sequences)
@@ -245,19 +246,19 @@ def main():
         for file, _, _ in tqdm(processed, desc="Compressing files"):
             compress(file)
 
-    print("Sequence Count Summary:")
-    total_dropped = 0
-    total_kept = 0
-    for file, dropped, total in processed:
-        total_dropped += dropped
-        total_kept += total - dropped
-        print(
-            f"{file.name}:",
-            f"Kept: {total - dropped:,}/{total:,} ({(total - dropped)/total:.3%});", # type: ignore
-            f"Dropped: {dropped:,}/{total:,} ({dropped/total:.3%})")
-    print(
-        f"Total Kept: {total_kept:,}/{total_kept + total_dropped:,} ({total_kept / (total_dropped + total_kept):.3%});",
-        f"Total Dropped: {total_dropped:,}/{total_kept + total_dropped:,} ({total_dropped/(total_kept + total_dropped):.3%})")
+    # print("Sequence Count Summary:")
+    # total_dropped = 0
+    # total_kept = 0
+    # for file, dropped, total in processed:
+    #     total_dropped += dropped
+    #     total_kept += total - dropped
+    #     print(
+    #         f"{file.name}:",
+    #         f"Kept: {total - dropped:,}/{total:,} ({(total - dropped)/total:.3%});", # type: ignore
+    #         f"Dropped: {dropped:,}/{total:,} ({dropped/total:.3%})")
+    # print(
+    #     f"Total Kept: {total_kept:,}/{total_kept + total_dropped:,} ({total_kept / (total_dropped + total_kept):.3%});",
+    #     f"Total Dropped: {total_dropped:,}/{total_kept + total_dropped:,} ({total_dropped/(total_kept + total_dropped):.3%})")
 
 
 if __name__ == "__main__":

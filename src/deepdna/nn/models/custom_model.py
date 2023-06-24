@@ -27,13 +27,15 @@ class ModelWrapper(Generic[ModelType], metaclass=PostInit):
     this class ties the model wrapper's properties to the nested
     model's properties, along with a generic call method.
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, auto_build=False, **kwargs):
         super().__init__(*args, **kwargs)
+        self._auto_build = auto_build
         self.model: ModelType
 
     def __post_init__(self):
         self.model = self.build_model()
-        self.initialize_model()
+        if self._auto_build:
+            self.initialize_model()
 
     def initialize_model(self):
         self(self.input)

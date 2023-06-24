@@ -1,6 +1,14 @@
-# deep-learning-dna
+# deep-dna
 
 A repository of deep learning models for DNA samples and sequences.
+
+## Setup
+
+```bash
+git clone https://github.com/DLii-Research/deep-dna --branch=refactor
+cd deep-dna
+pip3 install -e .
+```
 
 ## Model Types
 

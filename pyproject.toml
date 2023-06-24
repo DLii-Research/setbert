@@ -1,5 +1,5 @@
 [project]
-name = "deep-learning-dna"
+name = "deep-dna"
 version = "0.0.1"
 authors = [
   { name="David W. Ludwig II", email="davidludwigii@gmail.com" }
@@ -12,14 +12,14 @@ dependencies = [
   "lmdbm-lockable >= 0.0.5",
   "dnadb >= 0.6.4",
   "tf-settransformer >= 0.2.5",
-  "tensorflow >= 2.10.0",
+  "tensorflow >= 2.9.0",
   "tf-utilities >= 0.1.8",
   "wandb >= 0.14.0"
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/DLii-Research/deep-learning-dna"
-"Bug Tracker" = "https://github.com/DLii-Research/deep-learning-dna/issues"
+"Homepage" = "https://github.com/DLii-Research/deep-dna"
+"Bug Tracker" = "https://github.com/DLii-Research/deep-dna/issues"
 
 [tool.ruff]
 line-length = 100

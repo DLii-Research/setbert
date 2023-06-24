@@ -191,7 +191,7 @@ class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
         training: bool|None = None,
         **kwargs
     ):
-        if tf.rank(inputs) == tf.rank(self.input_shape) + 1:
+        if inputs.dtype == tf.int32 or inputs.dtype == tf.int64:
             embeddings = tf.stop_gradient(self.base.dnabert_encoder.encode(inputs))
         else:
             embeddings = inputs
