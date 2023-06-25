@@ -187,11 +187,12 @@ class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
     def call(
         self,
         inputs,
+        compute_sequence_embeddings: bool = True,
         return_attention_scores: bool = False,
         training: bool|None = None,
         **kwargs
     ):
-        if inputs.dtype == tf.int32 or inputs.dtype == tf.int64:
+        if compute_sequence_embeddings:
             embeddings = tf.stop_gradient(self.base.dnabert_encoder.encode(inputs))
         else:
             embeddings = inputs
@@ -201,11 +202,13 @@ class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
     def __call__(
         self,
         inputs,
+        compute_sequence_embeddings: bool = True,
         return_attention_scores: bool = False,
         training: bool|None = None,
         **kwargs
     ):
         return super().__call__(inputs, training=training, **(kwargs | dict(
+            compute_sequence_embeddings=compute_sequence_embeddings,
             return_attention_scores=return_attention_scores
         )))
 
