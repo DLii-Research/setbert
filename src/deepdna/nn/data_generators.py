@@ -124,11 +124,13 @@ class SequenceGenerator(BatchGenerator):
     ]:
         subsample_size = self.subsample_size or 1
         sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
-        sample_ids, samples = self.sample_sampler.sample_with_ids(self.batch_size, self.balance, rng)
-        sequence_ids = np.empty((self.batch_size, subsample_size), dtype=str)
-        for i, sample in enumerate(samples):
+        sample_ids = np.empty(self.batch_size, dtype=np.int32)
+        sequence_ids = [None] * self.batch_size
+        samples = self.sample_sampler.sample_with_ids(self.batch_size, self.balance, rng)
+        for i, (sample_id, sample) in enumerate(samples):
             sequence_info = tuple(self.sequence_sampler.sample_with_ids(sample, subsample_size, rng))
             sequence_ids[i], sequences[i] = zip(*sequence_info)
+            sample_ids[i] = sample_id
         sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
         if self.subsample_size is None:
             sequences = np.squeeze(sequences, axis=1)
