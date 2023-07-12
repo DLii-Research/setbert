@@ -53,7 +53,7 @@ class SetBertModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
                     is_final_block=i == self.stack - 1
                 )(y, return_attention_scores=True)
             score_outputs.append(scores)
-        return tf.keras.Model(x, (y, *score_outputs))
+        return tf.keras.Model(x, (y, score_outputs))
 
     def call(
         self,
