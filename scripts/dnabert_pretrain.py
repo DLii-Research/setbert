@@ -1,5 +1,5 @@
 import bootstrap
-from dnadb import fasta, fastq
+from dnadb import fasta, fastq, sample
 from itertools import chain
 from pathlib import Path
 import sys
@@ -58,8 +58,8 @@ def load_datasets(config) -> tuple[SequenceGenerator, SequenceGenerator|None]:
     )
     train = SequenceGenerator(
         chain(
-            map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Train)),
-            map(fastq.FastqDb, dataset.fastq_dbs(Dataset.Split.Train)),
+            map(sample.load_fasta, dataset.fasta_dbs(Dataset.Split.Train)),
+            map(sample.load_fastq, dataset.fastq_dbs(Dataset.Split.Train)),
         ),
         batches_per_epoch=config.batches_per_epoch,
         rng = tfs.rng(),
@@ -69,8 +69,8 @@ def load_datasets(config) -> tuple[SequenceGenerator, SequenceGenerator|None]:
     if dataset.has_split(Dataset.Split.Test):
         validation = SequenceGenerator(
             chain(
-                map(fasta.FastaDb, dataset.fasta_dbs(Dataset.Split.Train)),
-                map(fastq.FastqDb, dataset.fastq_dbs(Dataset.Split.Train)),
+                map(sample.load_fasta, dataset.fasta_dbs(Dataset.Split.Train)),
+                map(sample.load_fastq, dataset.fastq_dbs(Dataset.Split.Train)),
             ),
             batches_per_epoch=config.val_batches_per_epoch,
             rng = tfs.rng(),
