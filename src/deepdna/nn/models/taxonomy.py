@@ -1,5 +1,6 @@
 from dnadb import taxonomy
 import tensorflow as tf
+from typing import Iterable
 
 from .custom_model import ModelWrapper, CustomModel
 from .utils import encapsulate_model
@@ -9,6 +10,46 @@ from ..registry import CustomObject
 
 @CustomObject
 class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel[tf.Tensor, tuple[tf.Tensor, ...]]):
+    def __init__(
+        self,
+        base: tf.keras.Model,
+        taxonomies: Iterable[str],
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.base = base
+        self.taxonomy_id_map = {}
+        self.id_to_taxonomy_map = []
+        for tax in taxonomies:
+            if tax not in self.taxonomy_id_map:
+                assert isinstance(tax, str), "Taxonomy label must be a string."
+                self.id_to_taxonomy_map.append(tax)
+                self.taxonomy_id_map[tax] = len(self.taxonomy_id_map)
+        self.model = self.build_model()
+
+    def default_loss(self):
+        return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+
+    def default_metrics(self):
+        return [
+            tf.keras.metrics.SparseCategoricalAccuracy()
+        ]
+
+    def build_model(self):
+        x, y = encapsulate_model(self.base)
+        y = tf.keras.layers.Dense(len(self.taxonomy_id_map))(y)
+        model = tf.keras.Model(x, y)
+        return model
+
+    def get_config(self):
+        return super().get_config() | {
+            "base": self.base,
+            "taxonomies": list(self.taxonomy_id_map.keys())
+        }
+
+
+@CustomObject
+class NaiveHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel[tf.Tensor, tuple[tf.Tensor, ...]]):
     def __init__(
         self,
         base: tf.keras.Model,
@@ -67,7 +108,7 @@ class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel[tf.Tensor, tupl
 
 
 @CustomObject
-class BertaxTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
+class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationModel):
     """
     From the official BERTax implementation.
 
@@ -91,7 +132,7 @@ class BertaxTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
 
 
 @CustomObject
-class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
+class TopDownTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationModel):
     def build_model(self):
         assert self.include_missing is False, "TopDownTaxonomyClassificationModel does not currently support missing taxons."
         taxon_counts_by_level = []
@@ -119,7 +160,7 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
 
 
 @CustomObject
-class TopDownConcatTaxonomyClassificationModel(NaiveTaxonomyClassificationModel):
+class TopDownConcatTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationModel):
     def build_model(self):
         x, y = encapsulate_model(self.base)
         outputs = [
