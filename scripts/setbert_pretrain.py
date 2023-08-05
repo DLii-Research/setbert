@@ -1,4 +1,4 @@
-from dnadb import fasta, fastq
+from dnadb import fasta, fastq, sample
 from itertools import chain
 from pathlib import Path
 import sys
@@ -11,7 +11,7 @@ import bootstrap
 from deepdna.data.dataset import Dataset
 from deepdna.nn import losses
 from deepdna.nn.callbacks import LearningRateStepScheduler
-from deepdna.nn.data_generators import SequenceEmbeddingGenerator
+from deepdna.nn.data_generators import SequenceGenerator
 from deepdna.nn.models import dnabert, setbert, load_model
 from deepdna.nn.utils import optimizer
 
@@ -44,7 +44,7 @@ def define_arguments(cli: tfs.CliArgumentFactory):
     cli.argument("--lr", type=float, default=4e-4)
     cli.argument("--init-lr", type=float, default=0.0)
     cli.argument("--warmup-steps", type=int, default=None)
-    cli.argument("--loss-fn", choices=["chamfer", "setloss"], default="chamfer")
+    cli.argument("--loss-fn", choices=["chamfer", "setloss"], default="setloss")
 
     # Logging
     cli.argument("--save-to", type=str, default=None)
@@ -56,36 +56,52 @@ def load_pretrained_dnabert_model(config) -> dnabert.DnaBertModel:
     return load_model(pretrain_path, dnabert.DnaBertPretrainModel).base
 
 
-def load_datasets(
-    config,
-    dnabert_base: dnabert.DnaBertModel
-) -> tuple[SequenceEmbeddingGenerator, SequenceEmbeddingGenerator|None]:
+def load_fasta(path):
+    print(path)
 
+
+def load_datasets(config, dnabert_base: dnabert.DnaBertModel) -> tuple[SequenceGenerator, SequenceGenerator|None]:
     datasets = [Dataset(path) for path in config.dataset_paths]
     test_datasets = [d for d in datasets if d.has_split(Dataset.Split.Test)]
 
+    train_samples = []
+    train_fastas = [f for d in datasets for f in d.fasta_dbs(Dataset.Split.Train)]
+    for fasta_db in train_fastas:
+        if fasta_db.with_suffix(".mapping.db").exists():
+            train_samples += sample.load_multiplexed_fasta(fasta_db, fasta_db.with_suffix(".mapping.db"))
+        else:
+            train_samples.append(fasta.load_fasta(fasta_db))
+    train_samples += [f for d in datasets for f in map(fastq.FastqDb, d.fastq_dbs(Dataset.Split.Train))]
+
+    print("Found", len(train_samples), "sample(s).")
+
     generator_args = dict(
-        dnabert_base = dnabert_base,
+        sequence_length=dnabert_base.sequence_length,
+        kmer=dnabert_base.kmer,
+        use_kmer_inputs=True,
+        use_kmer_labels=True,
         batch_size = config.batch_size,
         subsample_size = config.subsample_size,
     )
 
-    train = SequenceEmbeddingGenerator(
-        chain(
-            chain(*(map(fasta.FastaDb, d.fasta_dbs(Dataset.Split.Train)) for d in datasets)),
-            chain(*(map(fastq.FastqDb, d.fastq_dbs(Dataset.Split.Train)) for d in datasets))),
+    train = SequenceGenerator(
+        train_samples,
         batches_per_epoch=config.batches_per_epoch,
         rng = tfs.rng(),
         **generator_args
     )
     validation = None
     if len(test_datasets):
-        validation = SequenceEmbeddingGenerator(
-            chain(
-                chain(*(map(fasta.FastaDb, d.fasta_dbs(Dataset.Split.Test))
-                    for d in test_datasets if d.has_split(Dataset.Split.Test))),
-                chain(*(map(fastq.FastqDb, d.fastq_dbs(Dataset.Split.Test))
-                    for d in test_datasets if d.has_split(Dataset.Split.Test)))),
+        test_samples = []
+        test_fastas = [f for d in datasets for f in d.fasta_dbs(Dataset.Split.Test)]
+        for fasta_db in test_fastas:
+            if fasta_db.with_suffix(".mapping.db").exists():
+                test_samples += sample.load_multiplexed_fasta(fasta_db, fasta_db.with_suffix(".mapping.db"))
+            else:
+                test_samples.append(fasta.load_fasta(fasta_db))
+        test_samples += [f for d in datasets for f in map(fastq.FastqDb, d.fastq_dbs(Dataset.Split.Test))]
+        validation = SequenceGenerator(
+            test_samples,
             batches_per_epoch=config.val_batches_per_epoch,
             rng = tfs.rng(),
             **generator_args
@@ -93,9 +109,11 @@ def load_datasets(
     return (train, validation)
 
 
-def create_model(config):
+def create_model(config, dnabert_base: dnabert.DnaBertModel):
     print("Creating model...")
+    encoder = dnabert.DnaBertEncoderModel(dnabert_base, chunk_size=256)
     base = setbert.SetBertModel(
+        encoder,
         embed_dim=config.embed_dim,
         max_set_len=config.subsample_size,
         stack=config.stack,
@@ -156,7 +174,7 @@ def train(config, model_path):
         if model_path is not None:
             model = load_model(model_path)
         else:
-            model = create_model(config)
+            model = create_model(config, dnabert_base)
 
         # Create any collbacks we may need
         callbacks = create_callbacks(config)

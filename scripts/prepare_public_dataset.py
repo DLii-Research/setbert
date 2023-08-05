@@ -45,75 +45,35 @@ def define_arguments(cli: tfs.CliArgumentFactory):
             help=f"Use the {dataset.NAME} dataset")
 
 
-def load_train_labels(config, datasets: list[FastaDataset], rng: np.random.Generator) -> set[str]:
-    taxonomies = chain(*[dataset.taxonomies() for dataset in datasets])
-    labels = list(set(tqdm((t.label for t in taxonomies), desc="Loading unique labels", leave=False)))
-    rng.shuffle(labels) # type: ignore
-    return set(labels[int(config.test_split*len(labels)):])
+def get_test_sequences(config, dataset: FastaDataset, rng: np.random.Generator) -> set[str]:
+    """
+    Get a list of sequence IDs to hold out for testing, ensuring each label appears at least once
+    during training.
+    """
+    label_to_id = {}
+    id_list = []
+    for sequence, tax in tqdm(fasta.entries_with_taxonomy(dataset.sequences(), dataset.taxonomies()), leave=False, desc="Finding valid sequences..."):
+        if len(sequence) < config.min_length:
+            continue
+        if tax.label not in label_to_id:
+            label_to_id[tax.label] = []
+        label_to_id[tax.label].append(tax.identifier)
+    # Find test elements.
+    for ids in label_to_id.values():
+        # Remove one element at random from each list to ensure
+        # we keep at least label obseravtion for training
+        ids.pop(rng.choice(len(ids)))
+        id_list += ids
+    rng.shuffle(id_list)
+    n = len(label_to_id) + len(id_list)
+    split_index = int(config.test_split*n) - len(label_to_id)
+    test_ids = id_list[:split_index]
+    return set(test_ids)
 
 
 def dataset_file_names(datasets: list[FastaDataset]) -> tuple[str, str]:
     name = "-".join([f"{d.name}_{d.version}" for d in datasets])
     return name + ".fasta", name + ".tax.tsv"
-
-
-def output_fasta(
-    config,
-    datasets: list[FastaDataset],
-    train_labels: set[str],
-    hierarchy: taxonomy.TaxonomyHierarchy,
-    train_path: Path,
-    test_path: Path|None
-) -> list[Path]:
-    sequences_file_name, taxonomy_file_name = dataset_file_names(datasets)
-    train_fasta = open(train_path / sequences_file_name, 'w')
-    train_tax = open(train_path / taxonomy_file_name, 'w')
-    files: list[TextIO] = [train_fasta, train_tax]
-    if test_path is not None:
-        test_fasta = open(test_path / sequences_file_name, 'w')
-        test_tax = open(test_path / taxonomy_file_name, 'w')
-        files += [test_fasta, test_tax]
-    sequences = chain(*[dataset.sequences() for dataset in datasets])
-    taxonomies = chain(*[dataset.taxonomies() for dataset in datasets])
-    for sequence, tax in tqdm(fasta.entries_with_taxonomy(sequences, taxonomies), leave=False, desc="Writing Fasta/Taxonomy entries"):
-        if len(sequence.sequence) < config.min_length:
-            continue
-        fasta_out, tax_out = (train_fasta, train_tax)
-        if tax.label not in train_labels:
-            tax = hierarchy.reduce_entry(tax)
-            fasta_out, tax_out = (test_fasta, test_tax) # type: ignore
-        fasta_out.write(str(sequence) + '\n')
-        tax_out.write(str(tax).replace('__uncultured', '__') + '\n')
-    for file in files:
-        file.close()
-    return [Path(file.name) for file in files]
-
-
-def output_db(
-    config,
-    datasets: list[FastaDataset],
-    train_labels: set[str],
-    hierarchy: taxonomy.TaxonomyHierarchy,
-    train_path: Path,
-    test_path: Path|None
-):
-    sequences_file_name, taxonomy_file_name = dataset_file_names(datasets)
-    train_fasta = fasta.FastaDbFactory(train_path / sequences_file_name)
-    train_tax = taxonomy.TaxonomyDbFactory(train_path / taxonomy_file_name)
-    if test_path is not None:
-        test_fasta = fasta.FastaDbFactory(test_path / sequences_file_name)
-        test_tax = taxonomy.TaxonomyDbFactory(test_path / taxonomy_file_name)
-    sequences = chain(*[dataset.sequences() for dataset in datasets])
-    taxonomies = chain(*[dataset.taxonomies() for dataset in datasets])
-    for sequence, tax in tqdm(fasta.entries_with_taxonomy(sequences, taxonomies), leave=False, desc="Writing DB entries"):
-        if len(sequence.sequence) < config.min_length:
-            continue
-        fasta_out, tax_out = (train_fasta, train_tax)
-        if tax.label not in train_labels:
-            tax = hierarchy.reduce_entry(tax)
-            fasta_out, tax_out = (test_fasta, test_tax) # type: ignore
-        fasta_out.write_entry(sequence)
-        tax_out.write_entry(replace(tax, label=tax.label.replace('__uncultured', '__')))
 
 
 def main():
@@ -146,13 +106,6 @@ def main():
 
     for i in trange(config.num_splits, desc="Dataset splits"):
 
-        # Fetch the unique labels used for training
-        train_labels = load_train_labels(config, datasets, rng)
-
-        # Create the taxonomy hierarchy for training labels
-        hierarchy = taxonomy.TaxonomyHierarchy(depth=6)
-        hierarchy.add_taxonomies(train_labels)
-
         # Create the directories
         train_path = output_path
         test_path = None
@@ -163,23 +116,48 @@ def main():
             test_path.mkdir(parents=True, exist_ok=True)
         train_path.mkdir(parents=True, exist_ok=True)
 
-        if config.output_fasta:
-            fasta_files += output_fasta(
-                config,
-                datasets,
-                train_labels,
-                hierarchy,
-                train_path,
-                test_path)
+        # Get the output file names
+        sequences_file_name, taxonomy_file_name = dataset_file_names(datasets)
 
+        # Create the FASTA outputs
+        train_fasta = train_tax = test_fasta = test_tax = None
+        if config.output_fasta:
+            train_fasta = open(train_path / sequences_file_name, 'w')
+            train_tax = open(train_path / taxonomy_file_name, 'w')
+            fasta_files.append(train_fasta.name)
+            if test_path is not None:
+                test_fasta = open(test_path / sequences_file_name, 'w')
+                test_tax = open(test_path / taxonomy_file_name, 'w')
+                fasta_files.append(test_fasta.name)
+
+        # Create the DB outputs
+        train_fasta_db = train_tax_db = test_fasta_db = test_tax_db = None
         if config.output_db:
-            output_db(
-                config,
-                datasets,
-                train_labels,
-                hierarchy,
-                train_path,
-                test_path)
+            train_fasta_db = fasta.FastaDbFactory(train_path / sequences_file_name)
+            train_tax_db = taxonomy.TaxonomyDbFactory(train_path / taxonomy_file_name)
+            if test_path is not None:
+                test_fasta_db = fasta.FastaDbFactory(test_path / sequences_file_name)
+                test_tax_db = taxonomy.TaxonomyDbFactory(test_path / taxonomy_file_name)
+
+        for dataset in tqdm(datasets, desc="Processing dataset"):
+
+            # Split the dataset
+            test_ids = get_test_sequences(config, dataset, rng)
+
+            sequences = dataset.sequences()
+            taxonomies = dataset.taxonomies()
+            for sequence, tax in tqdm(fasta.entries_with_taxonomy(sequences, taxonomies), leave=False, desc="Writing FASTA/taxonomy entries"):
+                out_fasta, out_tax = train_fasta, train_tax
+                out_fasta_db, out_tax_db = train_fasta_db, train_tax_db
+                if sequence.identifier in test_ids:
+                    out_fasta, out_tax = test_fasta, test_tax
+                    out_fasta_db, out_tax_db = test_fasta_db, test_tax_db
+                if out_fasta:
+                    out_fasta.write(str(sequence) + '\n')
+                    out_tax.write(str(tax).replace('__uncultured', '__') + '\n')
+                if out_fasta_db:
+                    out_fasta_db.write_entry(sequence)
+                    out_tax_db.write_entry(replace(tax, label=tax.label.replace('__uncultured', '__')))
 
         if config.compress and len(fasta_files):
             for file in tqdm(fasta_files, description="Compressing"):
