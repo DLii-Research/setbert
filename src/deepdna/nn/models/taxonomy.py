@@ -3,10 +3,10 @@ import tensorflow as tf
 from typing import Iterable
 
 from .custom_model import ModelWrapper, CustomModel
-from .utils import encapsulate_model
 from ..losses import SparseCategoricalCrossentropyWithIgnoreClass
 from ..metrics import SparseCategoricalAccuracyWithIgnoreClass
 from ..registry import CustomObject
+from ..utils import encapsulate_model
 
 @CustomObject
 class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel[tf.Tensor, tuple[tf.Tensor, ...]]):

@@ -174,12 +174,32 @@ class SetBertPretrainModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
 
 @CustomObject
 class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
-    def __init__(self, base: SetBertModel, **kwargs):
+    def __init__(
+        self,
+        base: SetBertModel,
+        compute_sequence_embeddings: bool = False,
+        stop_sequence_embedding_gradient: bool = True,
+        **kwargs
+    ):
         super().__init__(**kwargs)
         self.base = base
+        self.compute_sequence_embeddings = compute_sequence_embeddings
+        self.stop_sequence_embedding_gradient = stop_sequence_embedding_gradient
 
     def build_model(self):
-        y = x = tf.keras.layers.Input(self.base.input_shape[1:])
+        if self.compute_sequence_embeddings:
+            y = x = tf.keras.layers.Input((
+                self.base.input_shape[1], # set size
+                self.base.dnabert_encoder.input_shape[-1] # kmer sequence length
+            ))
+            y = layers.ChunkedEmbeddingLayer(
+                self.base.dnabert_encoder,
+                chunk_size=self.base.dnabert_encoder.chunk_size,
+                stop_gradient=self.stop_sequence_embedding_gradient
+            )(y)
+
+        else:
+            y = x = tf.keras.layers.Input(self.base.input_shape[1:])
         y, *scores = self.base(y, return_attention_scores=True)
         token, _ = layers.SplitClassToken()(y)
         return tf.keras.Model(x, (token, scores))
@@ -187,32 +207,27 @@ class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
     def call(
         self,
         inputs,
-        compute_sequence_embeddings: bool = True,
         return_attention_scores: bool = False,
         training: bool|None = None,
         **kwargs
     ):
-        if compute_sequence_embeddings:
-            embeddings = tf.stop_gradient(self.base.dnabert_encoder.encode(inputs))
-        else:
-            embeddings = inputs
-        result = super().call(embeddings, training=training, **kwargs)
+        result = super().call(inputs, training=training, **kwargs)
         return (result[0], result[1:]) if return_attention_scores else result[0]
 
     def __call__(
         self,
         inputs,
-        compute_sequence_embeddings: bool = True,
         return_attention_scores: bool = False,
         training: bool|None = None,
         **kwargs
     ):
         return super().__call__(inputs, training=training, **(kwargs | dict(
-            compute_sequence_embeddings=compute_sequence_embeddings,
             return_attention_scores=return_attention_scores
         )))
 
     def get_config(self):
         return super().get_config() | {
-            "base": self.base
+            "base": self.base,
+            "compute_sequence_embeddings": self.compute_sequence_embeddings,
+            "stop_sequence_embedding_gradient": self.stop_sequence_embedding_gradient
         }

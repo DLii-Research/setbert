@@ -1,10 +1,10 @@
 import tensorflow as tf
-import tf_utilities as tfu
-from typing import cast
+from typing import cast, Optional
 
 from .custom_model import ModelWrapper, CustomModel
 from .. import layers
 from ..registry import CustomObject
+from ..utils import subbatch_predict
 
 @CustomObject
 class DnaBertModel(ModelWrapper, tf.keras.Model):
@@ -121,7 +121,7 @@ class DnaBertEncoderModel(ModelWrapper, tf.keras.Model):
     """
     The DNABERT encoder/embedding model architecture
     """
-    def __init__(self, base: DnaBertModel, chunk_size: int, **kwargs):
+    def __init__(self, base: DnaBertModel, chunk_size: Optional[int] = None, **kwargs):
         super().__init__(**kwargs)
         self.base = base
         self.chunk_size = chunk_size
@@ -134,10 +134,16 @@ class DnaBertEncoderModel(ModelWrapper, tf.keras.Model):
         return tf.keras.Model(x, token)
 
     def encode(self, batch: tf.Tensor, chunk_size: int|None = None):
+        """
+        Deprecated
+        """
         chunk_size = chunk_size if chunk_size is not None else self.chunk_size
         original_shape = tf.shape(batch)
         batch = tf.reshape(batch, (-1, original_shape[-1]))
-        result = tfu.subbatching.subbatch_predict(self, batch, chunk_size)
+        if chunk_size is None:
+            result = self(batch)
+        else:
+            result = subbatch_predict(self, batch, chunk_size)
         return tf.reshape(result, tf.concat((original_shape[:-1], (-1,)), axis=0))
 
     def get_config(self):

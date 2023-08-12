@@ -1,8 +1,7 @@
 import abc
 import tensorflow as tf
 from typing import cast, Generic, ParamSpec, TypeVar
-from .utils import accumulate_train_step
-from ..utils import PostInit
+from ..utils import accumulate_train_step, PostInit
 
 Params = TypeVar("Params")
 ReturnType = TypeVar("ReturnType")
