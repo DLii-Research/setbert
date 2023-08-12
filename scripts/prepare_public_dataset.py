@@ -45,30 +45,29 @@ def define_arguments(cli: tfs.CliArgumentFactory):
             help=f"Use the {dataset.NAME} dataset")
 
 
-def get_test_sequences(config, dataset: FastaDataset, rng: np.random.Generator) -> set[str]:
-    """
-    Get a list of sequence IDs to hold out for testing, ensuring each label appears at least once
-    during training.
-    """
+def group_sequences_by_label(config, dataset: FastaDataset) -> dict[str, list[str]]:
     label_to_id = {}
-    id_list = []
     for sequence, tax in tqdm(fasta.entries_with_taxonomy(dataset.sequences(), dataset.taxonomies()), leave=False, desc="Finding valid sequences..."):
         if len(sequence) < config.min_length:
             continue
         if tax.label not in label_to_id:
             label_to_id[tax.label] = []
         label_to_id[tax.label].append(tax.identifier)
-    # Find test elements.
+    return label_to_id
+
+
+def get_test_fasta_ids(config, label_to_id: dict[str, list[str]], rng: np.random.Generator) -> set[str]:
+    all_ids = []
     for ids in label_to_id.values():
         # Remove one element at random from each list to ensure
-        # we keep at least label obseravtion for training
+        # we keep at least label observation for training
+        ids = ids.copy()
         ids.pop(rng.choice(len(ids)))
-        id_list += ids
-    rng.shuffle(id_list)
-    n = len(label_to_id) + len(id_list)
-    split_index = int(config.test_split*n) - len(label_to_id)
-    test_ids = id_list[:split_index]
-    return set(test_ids)
+        all_ids += ids
+    rng.shuffle(all_ids)
+    n = len(label_to_id) + len(all_ids)
+    split_index = int(config.test_split*n)
+    return set(all_ids[:split_index])
 
 
 def dataset_file_names(datasets: list[FastaDataset]) -> tuple[str, str]:
@@ -100,6 +99,11 @@ def main():
     if config.num_splits > 1 and config.test_split == 0.0:
         print("Num splits can only be used when a test split > 0.0 is supplied.")
         return 1
+
+    # Group labels
+    dataset_label_to_id = []
+    for dataset in tqdm(datasets, desc="Grouping FASTA IDs by labl"):
+        dataset_label_to_id.append(group_sequences_by_label(config, dataset))
 
     rng = tfs.rng()
     fasta_files: list[Path] = []
@@ -139,10 +143,10 @@ def main():
                 test_fasta_db = fasta.FastaDbFactory(test_path / sequences_file_name)
                 test_tax_db = taxonomy.TaxonomyDbFactory(test_path / taxonomy_file_name)
 
-        for dataset in tqdm(datasets, desc="Processing dataset"):
+        for dataset, label_to_id in tqdm(zip(datasets, dataset_label_to_id), desc="Processing dataset"):
 
             # Split the dataset
-            test_ids = get_test_sequences(config, dataset, rng)
+            test_ids = get_test_fasta_ids(config, label_to_id, rng)
 
             sequences = dataset.sequences()
             taxonomies = dataset.taxonomies()
