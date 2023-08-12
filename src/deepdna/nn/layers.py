@@ -2,10 +2,10 @@
 from dnadb import taxonomy
 import tensorflow as tf
 from settransformer import custom_layers as __settransformer_layers
-from typing import Any, Callable, cast, Generic, ParamSpec, TypedDict, TypeVar
+from typing import Any, Callable, cast, Generic, Optional, ParamSpec, TypedDict, TypeVar
 
 from . registry import CustomObject, register_custom_objects
-from . utils import tfcast
+from . utils import subbatch_predict, tfcast
 
 # Set Transformer Layers
 register_custom_objects(__settransformer_layers())
@@ -666,6 +666,41 @@ class SetMask(tf.keras.layers.Layer):
             "max_set_len": self.max_set_len,
             "mask_ratio": self.mask_ratio.numpy(), # type: ignore
             "use_keras_mask": self.use_keras_mask
+        }
+
+# Time-distributed Layers --------------------------------------------------------------------------
+
+class ChunkedEmbeddingLayer(TypedLayer[[tf.Tensor], tf.Tensor]):
+    """
+    A time distributed layer that evaluates in chunks.
+    """
+    def __init__(
+        self,
+        layer: tf.keras.layers.Layer|tf.keras.models.Model,
+        chunk_size: Optional[int] = None,
+        stop_gradient: bool = True,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.layer = layer
+        self.chunk_size = chunk_size
+        self.stop_gradient = stop_gradient
+
+    def call(
+        self,
+        inputs: tf.Tensor,
+        training: Optional[bool] = None,
+    ) -> tf.Tensor:
+        original_shape = tf.shape(inputs)
+        inputs = tf.reshape(inputs, (-1, original_shape[-1]))
+        result = subbatch_predict(self.layer, inputs, self.chunk_size, stop_gradient=self.stop_gradient)
+        return tf.reshape(result, tf.concat((original_shape[:-1], (-1,)), axis=0))
+
+    def get_config(self):
+        return super().get_config() | {
+            "layer": self.layer,
+            "chunk_size": self.chunk_size,
+            "stop_grads": self.stop_grads
         }
 
 # Set Generation -----------------------------------------------------------------------------------
