@@ -700,7 +700,7 @@ class ChunkedEmbeddingLayer(TypedLayer[[tf.Tensor], tf.Tensor]):
         return super().get_config() | {
             "layer": self.layer,
             "chunk_size": self.chunk_size,
-            "stop_grads": self.stop_grads
+            "stop_gradient": self.stop_gradient
         }
 
 # Set Generation -----------------------------------------------------------------------------------
