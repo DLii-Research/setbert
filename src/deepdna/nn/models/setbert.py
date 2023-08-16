@@ -179,12 +179,16 @@ class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
         base: SetBertModel,
         compute_sequence_embeddings: bool = False,
         stop_sequence_embedding_gradient: bool = True,
+        output_class: bool = True,
+        output_sequences: bool = False,
         **kwargs
     ):
         super().__init__(**kwargs)
         self.base = base
         self.compute_sequence_embeddings = compute_sequence_embeddings
         self.stop_sequence_embedding_gradient = stop_sequence_embedding_gradient
+        self.output_class = output_class
+        self.output_sequences = output_sequences
 
     def build_model(self):
         if self.compute_sequence_embeddings:
@@ -201,16 +205,24 @@ class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
         else:
             y = x = tf.keras.layers.Input(self.base.input_shape[1:])
         y, *scores = self.base(y, return_attention_scores=True)
-        token, _ = layers.SplitClassToken()(y)
-        return tf.keras.Model(x, (token, scores))
+        token, sequences = layers.SplitClassToken()(y)
+        output = tuple()
+        if self.output_class:
+            output += (token,)
+        if self.output_sequences:
+            output += (sequences,)
+        return tf.keras.Model(x, output+(scores,))
 
     def call(
         self,
         inputs,
+        compute_sequence_embeddings: bool = True,
         return_attention_scores: bool = False,
         training: bool|None = None,
         **kwargs
     ):
+        if compute_sequence_embeddings:
+            inputs = tf.stop_gradient(self.base.dnabert_encoder.encode(inputs))
         result = super().call(inputs, training=training, **kwargs)
         return (result[0], result[1:]) if return_attention_scores else result[0]
 
@@ -229,5 +241,7 @@ class SetBertEncoderModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
         return super().get_config() | {
             "base": self.base,
             "compute_sequence_embeddings": self.compute_sequence_embeddings,
-            "stop_sequence_embedding_gradient": self.stop_sequence_embedding_gradient
+            "stop_sequence_embedding_gradient": self.stop_sequence_embedding_gradient,
+            "output_class": self.output_class,
+            "output_sequences": self.output_sequences
         }
