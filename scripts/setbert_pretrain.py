@@ -90,22 +90,34 @@ def load_datasets(config, dnabert_base: dnabert.DnaBertModel) -> tuple[SequenceG
         rng = tfs.rng(),
         **generator_args
     )
+
     validation = None
-    if len(test_datasets):
-        test_samples = []
-        test_fastas = [f for d in datasets for f in d.fasta_dbs(Dataset.Split.Test)]
-        for fasta_db in test_fastas:
-            if fasta_db.with_suffix(".mapping.db").exists():
-                test_samples += sample.load_multiplexed_fasta(fasta_db, fasta_db.with_suffix(".mapping.db"))
-            else:
-                test_samples.append(fasta.load_fasta(fasta_db))
-        test_samples += [f for d in datasets for f in map(fastq.FastqDb, d.fastq_dbs(Dataset.Split.Test))]
-        validation = SequenceGenerator(
-            test_samples,
-            batches_per_epoch=config.val_batches_per_epoch,
-            rng = tfs.rng(),
-            **generator_args
-        )
+
+    # Weak validation
+    validation = SequenceGenerator(
+        train_samples,
+        batches_per_epoch=config.val_batches_per_epoch,
+        rng = tfs.rng(),
+        shuffle=False,
+        **generator_args,
+    )
+
+    # Strong validation
+    # if len(test_datasets):
+    #     test_samples = []
+    #     test_fastas = [f for d in datasets for f in d.fasta_dbs(Dataset.Split.Test)]
+    #     for fasta_db in test_fastas:
+    #         if fasta_db.with_suffix(".mapping.db").exists():
+    #             test_samples += sample.load_multiplexed_fasta(fasta_db, fasta_db.with_suffix(".mapping.db"))
+    #         else:
+    #             test_samples.append(fasta.load_fasta(fasta_db))
+    #     test_samples += [f for d in datasets for f in map(fastq.FastqDb, d.fastq_dbs(Dataset.Split.Test))]
+    #     validation = SequenceGenerator(
+    #         test_samples,
+    #         batches_per_epoch=config.val_batches_per_epoch,
+    #         rng = tfs.rng(),
+    #         **generator_args
+    #     )
     return (train, validation)
 
 
