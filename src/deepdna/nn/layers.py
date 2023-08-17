@@ -693,7 +693,10 @@ class ChunkedEmbeddingLayer(TypedLayer[[tf.Tensor], tf.Tensor]):
     ) -> tf.Tensor:
         original_shape = tf.shape(inputs)
         inputs = tf.reshape(inputs, (-1, original_shape[-1]))
-        result = subbatch_predict(self.layer, inputs, self.chunk_size, stop_gradient=self.stop_gradient)
+        chunk_size = self.chunk_size
+        if chunk_size is None:
+            chunk_size = tf.shape(inputs)[0]
+        result = subbatch_predict(self.layer, inputs, chunk_size, stop_gradient=self.stop_gradient)
         return tf.reshape(result, tf.concat((original_shape[:-1], (-1,)), axis=0))
 
     def get_config(self):
