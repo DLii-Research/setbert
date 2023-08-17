@@ -1,25 +1,10 @@
 import abc
+import keras
 import tensorflow as tf
-from typing import cast, Generic, ParamSpec, TypeVar
+from typing import Any, Callable, Generic, Optional, TypeVar
 from ..utils import accumulate_train_step, PostInit
 
-Params = TypeVar("Params")
-ReturnType = TypeVar("ReturnType")
-
-class TypedModel(tf.keras.Model, Generic[Params, ReturnType]):
-    """
-    A layer with type generics.
-    """
-    def __call__(
-        self,
-        inputs: Params,
-        training: bool|None = None,
-        **kwargs
-    ) -> ReturnType:
-        return cast(ReturnType, super().__call__(inputs, training=training, **kwargs))
-
-
-ModelType = TypeVar("ModelType", bound=tf.keras.models.Model)
+ModelType = TypeVar("ModelType", bound=keras.Model)
 class ModelWrapper(Generic[ModelType], metaclass=PostInit):
     """
     For models that wrap a model to add extended functionality,
@@ -36,8 +21,11 @@ class ModelWrapper(Generic[ModelType], metaclass=PostInit):
         if self._auto_build:
             self.initialize_model()
 
+    def build_model(self) -> ModelType:
+        raise NotImplementedError()
+
     def initialize_model(self):
-        self(self.input)
+        self(self.input) # type: ignore
 
     def plot(
         self,
@@ -111,7 +99,7 @@ class ModelWrapper(Generic[ModelType], metaclass=PostInit):
         super().__setattr__(name, value)
 
 
-class CustomModel(TypedModel[Params, ReturnType], Generic[Params, ReturnType]):
+class CustomModel(keras.Model):
     """
     Custom Keras model with extended functionality.
     """
@@ -197,6 +185,9 @@ class CustomModel(TypedModel[Params, ReturnType], Generic[Params, ReturnType]):
             subbatch_size = tf.constant(2**31 - 1, dtype=tf.int32)
         self.__subbatch_size = subbatch_size
         return super().fit(*args, **kwargs)
+
+    def __call__(self, *args, **kwargs) -> tf.Tensor:
+        return super().__call__(*args, **kwargs) # type: ignore
 
     @property
     def subbatch_size(self):

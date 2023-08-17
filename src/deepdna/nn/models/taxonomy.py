@@ -9,7 +9,7 @@ from ..registry import CustomObject
 from ..utils import encapsulate_model
 
 @CustomObject
-class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel[tf.Tensor, tuple[tf.Tensor, ...]]):
+class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel): # [tf.Tensor, tuple[tf.Tensor, ...]])
     def __init__(
         self,
         base: tf.keras.Model,
@@ -49,7 +49,7 @@ class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel[tf.Tensor, tupl
 
 
 @CustomObject
-class NaiveHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel[tf.Tensor, tuple[tf.Tensor, ...]]):
+class NaiveHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel): # [tf.Tensor, tuple[tf.Tensor, ...]]
     def __init__(
         self,
         base: tf.keras.Model,

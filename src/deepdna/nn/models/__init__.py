@@ -8,6 +8,7 @@ from . import contrastive
 from . import dnabert
 from . import setbert
 from . import taxonomy
+from . import transformer
 
 from .. import registry
 

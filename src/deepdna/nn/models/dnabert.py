@@ -7,7 +7,7 @@ from ..registry import CustomObject
 from ..utils import subbatch_predict
 
 @CustomObject
-class DnaBertModel(ModelWrapper, tf.keras.Model):
+class DnaBertModel(ModelWrapper, CustomModel):
     """
     The base DNABERT model definition.
     """
@@ -63,7 +63,7 @@ class DnaBertModel(ModelWrapper, tf.keras.Model):
 
 
 @CustomObject
-class DnaBertPretrainModel(ModelWrapper, CustomModel[tf.Tensor, tf.Tensor]):
+class DnaBertPretrainModel(ModelWrapper, CustomModel):
     """
     The DNABERT pretraining model architecture
     """

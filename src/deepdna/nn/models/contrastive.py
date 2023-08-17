@@ -7,7 +7,7 @@ from ..losses import ContrastiveLoss
 from ..registry import CustomObject
 
 @CustomObject
-class ContrastiveModel(CustomModel[tuple[tf.Tensor, tf.Tensor], tf.Tensor]):
+class ContrastiveModel(CustomModel):
     def __init__(
         self,
         encoder_a: tf.keras.models.Model,
@@ -71,14 +71,16 @@ class ContrastiveModel(CustomModel[tuple[tf.Tensor, tf.Tensor], tf.Tensor]):
         y_true = tf.range(n)
         y_pred = self(data, training=training, _return_embeddings=self.shared_latent_space)
         if self.shared_latent_space:
-            y_pred, (embeddings_a, embeddings_b) = y_pred
+            y_pred, (embeddings_a, embeddings_b) = y_pred # type: ignore
             y_true = (y_true, embeddings_a)
             y_pred = (y_pred, embeddings_b)
-        return self.compiled_loss(y_true, y_pred), y_true[0], y_pred[0]
+        assert self.compiled_loss is not None
+        return self.compiled_loss(y_true, y_pred), y_true[0], y_pred[0] # type: ignore
 
     def test_step(self, data):
         data = data[0] # discard targets
         _, y_true, y_pred = self._evaluate(data, training=False)
+        assert self.compiled_metrics is not None
         self.compiled_metrics.update_state(y_true, y_pred)
         return {m.name: m.result() for m in self.metrics}
 
@@ -88,10 +90,19 @@ class ContrastiveModel(CustomModel[tuple[tf.Tensor, tf.Tensor], tf.Tensor]):
             loss, y_true, y_pred = self._evaluate(data, training=True)
         grads = tape.gradient(loss, self.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
+        assert self.compiled_metrics is not None
         self.compiled_metrics.update_state(y_true, y_pred)
         return {m.name: m.result() for m in self.metrics}
 
-    def call(self, inputs, training=False, _return_norms=False, _return_embeddings=False):
+    def call(
+        self,
+        inputs: tuple[tf.Tensor, tf.Tensor],
+        training: Optional[bool]=None,
+        _return_norms=False,
+        _return_embeddings=False
+    ) -> tf.Tensor \
+        | tuple[tf.Tensor, tuple[tf.Tensor, tf.Tensor]] \
+        | tuple[tf.Tensor, tuple[tf.Tensor, tf.Tensor], tuple[tf.Tensor, tf.Tensor]]:
         a, b = inputs[0], inputs[1]
         embeddings_a = self.encoder_a(a, training=training)
         embeddings_b = self.encoder_b(b, training=training)
@@ -118,7 +129,26 @@ class ContrastiveModel(CustomModel[tuple[tf.Tensor, tf.Tensor], tf.Tensor]):
             result += ((embeddings_a, embeddings_b),)
         if len(result) == 1:
             result = result[0]
-        return result
+        return result # type: ignore
+
+    def __call__(
+        self,
+        inputs: tuple[tf.Tensor, tf.Tensor],
+        *args,
+        training: Optional[bool]=None,
+        _return_norms=False,
+        _return_embeddings=False,
+        **kwargs
+    ) -> tf.Tensor \
+        | tuple[tf.Tensor, tuple[tf.Tensor, tf.Tensor]] \
+        | tuple[tf.Tensor, tuple[tf.Tensor, tf.Tensor], tuple[tf.Tensor, tf.Tensor]]:
+        return super().__call__(
+            inputs,
+            *args,
+            training=training,
+            _return_norms=_return_norms,
+            _return_embeddings=_return_embeddings,
+            **kwargs)
 
     def get_config(self, no_config: bool = False):
         if no_config:
