@@ -1,6 +1,6 @@
 from dnadb import taxonomy
 import tensorflow as tf
-from typing import Iterable
+from typing import Generic, Optional, TypeVar
 
 from .custom_model import ModelWrapper, CustomModel
 from ..losses import SparseCategoricalCrossentropyWithIgnoreClass
@@ -8,23 +8,19 @@ from ..metrics import SparseCategoricalAccuracyWithIgnoreClass
 from ..registry import CustomObject
 from ..utils import encapsulate_model
 
+ModelType = TypeVar("ModelType", bound=tf.keras.Model)
+
 @CustomObject
-class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel): # [tf.Tensor, tuple[tf.Tensor, ...]])
+class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelType]):
     def __init__(
         self,
-        base: tf.keras.Model,
-        taxonomies: Iterable[str],
+        base: ModelType,
+        taxonomy_id_map: taxonomy.TaxonomyIdMap,
         **kwargs
     ):
         super().__init__(**kwargs)
         self.base = base
-        self.taxonomy_id_map = {}
-        self.id_to_taxonomy_map = []
-        for tax in taxonomies:
-            if tax not in self.taxonomy_id_map:
-                assert isinstance(tax, str), "Taxonomy label must be a string."
-                self.id_to_taxonomy_map.append(tax)
-                self.taxonomy_id_map[tax] = len(self.taxonomy_id_map)
+        self.taxonomy_id_map = taxonomy_id_map
         self.model = self.build_model()
 
     def default_loss(self):
@@ -41,18 +37,32 @@ class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel): # [tf.Tensor,
         model = tf.keras.Model(x, y)
         return model
 
+    def __call__(
+        self,
+        inputs: tf.Tensor,
+        *args,
+        training: Optional[bool] = None,
+        **kwargs
+    ) -> tf.Tensor:
+        return super().__call__(inputs, *args, training=training, **kwargs)
+
     def get_config(self):
         return super().get_config() | {
             "base": self.base,
-            "taxonomies": list(self.taxonomy_id_map.keys())
+            "taxonomy_id_map": self.taxonomy_id_map.serialize().decode()
         }
+
+    @classmethod
+    def from_config(cls, config):
+        config["taxonomy_id_map"] = taxonomy.TaxonomyIdMap.deserialize(config["taxonomy_id_map"])
+        return super().from_config(config)
 
 
 @CustomObject
-class NaiveHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel): # [tf.Tensor, tuple[tf.Tensor, ...]]
+class NaiveHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelType]): # [tf.Tensor, tuple[tf.Tensor, ...]]
     def __init__(
         self,
-        base: tf.keras.Model,
+        base: ModelType,
         hierarchy: taxonomy.TaxonomyHierarchy,
         include_missing: bool = True,
         **kwargs
@@ -82,8 +92,12 @@ class NaiveHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel): #
         for i in range(self.hierarchy.depth):
             dense = tf.keras.layers.Dense(
                 self.hierarchy.taxon_counts[i] + int(self.include_missing),
-                name=taxonomy.RANKS[i].lower())
+                name=taxonomy.RANKS[i].lower() + "_projection")
             outputs.append(dense(y))
+        outputs = [
+            tf.keras.layers.Activation("softmax", name=rank)(output)
+            for rank, output in zip(map(str.lower, taxonomy.RANKS), outputs)
+        ]
         return tf.keras.Model(x, outputs)
 
     def get_config(self):
@@ -95,16 +109,8 @@ class NaiveHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel): #
 
     @classmethod
     def from_config(cls, config):
-        config["hierarchy"] = taxonomy.TaxonomyHierarchy.deserialize(config["hierarchy"].encode())
+        config["hierarchy"] = taxonomy.TaxonomyHierarchy.deserialize(config["hierarchy"])
         return super().from_config(config)
-
-    def __call__(self, *args, **kwargs):
-        outputs = super().__call__(*args, **kwargs)
-        outputs = [
-            tf.keras.layers.Activation("softmax", name=rank)(output)
-            for rank, output in zip(map(str.lower, taxonomy.RANKS), outputs)
-        ]
-        return outputs
 
 
 @CustomObject

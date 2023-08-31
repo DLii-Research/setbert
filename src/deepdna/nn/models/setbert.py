@@ -91,13 +91,13 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
                 self.base.dnabert_encoder,
                 stop_gradient=self.stop_sequence_embedding_gradient
             )
-            y = self.embed_layer(y)
+            y = embeddings = self.embed_layer(y)
         else:
-            y = x = tf.keras.layers.Input((self.base.max_set_len, self.base.embed_dim))
+            y = embeddings = x = tf.keras.layers.Input((self.base.max_set_len, self.base.embed_dim))
         num_masked, y = self.masking(y)
         y = self.base(y)
         y = tf.keras.layers.Lambda(lambda x: x[0][:,1:x[1]+1,:])((y, num_masked))
-        return tf.keras.Model(x, (num_masked, y))
+        return tf.keras.Model(x, (embeddings, num_masked, y))
 
     def default_loss(self):
         return SortedLoss(tf.keras.losses.mean_squared_error)
@@ -141,14 +141,17 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
         self,
         inputs,
         training: bool|None = None,
-        return_num_masked: bool = False
+        return_num_masked: bool = False,
+        return_embeddings: bool = False
     ):
-        num_masked, y_pred = self.model(
+        embeddings, num_masked, y_pred = self.model(
             inputs,
             training=training)
         result = (y_pred,)
         if return_num_masked:
             result += (num_masked,)
+        if return_embeddings:
+            result += (embeddings,)
         if len(result) == 1:
             return result[0]
         return result
@@ -158,12 +161,14 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
         inputs,
         training: bool|None = None,
         return_num_masked: bool = False,
+        return_embeddings: bool = False,
         **kwargs
     ):
         return super().__call__(
             inputs,
             training=training,
             return_num_masked=return_num_masked,
+            return_embeddings=return_embeddings,
             **kwargs
         )
 
@@ -250,10 +255,10 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         training: bool|None = None,
         **kwargs
     ):
-        if compute_sequence_embeddings:
+        model = self.get_model(return_attention_scores)
+        if compute_sequence_embeddings and not self.compute_sequence_embeddings:
             inputs = tf.stop_gradient(self.base.dnabert_encoder.encode(inputs))
-        result = super().call(inputs, training=training, **kwargs)
-        return (result[0], result[1:]) if return_attention_scores else result[0]
+        return model(inputs, training=training)
 
     def __call__(
         self,

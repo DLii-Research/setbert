@@ -30,6 +30,7 @@ def define_arguments(cli: tfs.CliArgumentFactory):
     # Architecture Settings
     cli.argument("--subsample-size", type=int, default=1000)
     cli.argument("--embed-dim", type=int, default=64)
+    cli.argument("--chunk-size", type=int, default=256)
     cli.argument("--stack", type=int, default=8)
     cli.argument("--num-heads", type=int, default=8)
     cli.argument("--num-induce-points", type=int, default=64)
@@ -53,7 +54,10 @@ def define_arguments(cli: tfs.CliArgumentFactory):
 
 def load_pretrained_dnabert_model(config) -> dnabert.DnaBertModel:
     pretrain_path = tfs.artifact(config, "dnabert")
-    return load_model(pretrain_path, dnabert.DnaBertPretrainModel).base
+    model = load_model(pretrain_path, dnabert.DnaBertPretrainModel)
+    while not isinstance(model, dnabert.DnaBertModel):
+        model = model.base
+    return model
 
 
 def load_fasta(path):
@@ -134,6 +138,7 @@ def create_model(config, dnabert_base: dnabert.DnaBertModel):
     model = setbert.SetBertPretrainModel(
         base=base,
         mask_ratio=config.mask_ratio)
+    model.chunk_size = config.chunk_size
 
     match config.loss_fn:
         case "chamfer":
@@ -149,11 +154,6 @@ def create_model(config, dnabert_base: dnabert.DnaBertModel):
         run_eagerly=config.run_eagerly
     )
     return model
-
-
-def load_previous_model(path: str|Path) -> setbert.SetBertPretrainModel:
-    print("Loading model from previous run:", path)
-    return load_model(path)
 
 
 def create_callbacks(config):
@@ -185,6 +185,7 @@ def train(config, model_path):
         # Create the autoencoder model
         if model_path is not None:
             model = load_model(model_path)
+            model.chunk_size = config.chunk_size
         else:
             model = create_model(config, dnabert_base)
 
@@ -220,7 +221,8 @@ def main(argv):
     model_path = None
     if tfs.is_resumed():
         print("Restoring previous model...")
-        model_path = tfs.restore_dir(config.save_to)
+        # model_path = tfs.restore_dir(config.save_to)
+    model_path = "/home/dwl2x/.cache/wandb/wandb/run-20230822_231455-zf5zi5rn/files/model"
 
     print(config)
 
