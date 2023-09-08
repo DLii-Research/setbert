@@ -96,6 +96,7 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
             y = embeddings = x = tf.keras.layers.Input((self.base.max_set_len, self.base.embed_dim))
         num_masked, y = self.masking(y)
         y = self.base(y)
+        # y = self.Dense(self.base.embed_dim)(y)
         y = tf.keras.layers.Lambda(lambda x: x[0][:,1:x[1]+1,:])((y, num_masked))
         return tf.keras.Model(x, (embeddings, num_masked, y))
 

@@ -196,82 +196,82 @@ class SampleGenerator(BatchGenerator):
             sequences = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases)
         return sequences.astype(np.int32), sample_ids
 
-class SequenceTaxonomyGenerator(BatchGenerator):
-    def __init__(
-        self,
-        fasta_taxonomy_pairs: Iterable[tuple[FastaSample, taxonomy.TaxonomyDb]],
-        sequence_length: int,
-        kmer: int = 1,
-        taxonomy_depth: int = 6,
-        taxonomy_hierarchy: Optional[taxonomy.TaxonomyHierarchy] = None,
-        subsample_size: int|None = None,
-        batch_size: int = 32,
-        batches_per_epoch: int = 100,
-        augment_slide: bool = True,
-        augment_ambiguous_bases: bool = True,
-        labels_as_dict: bool = False,
-        include_missing: bool = True,
-        balance: bool = False,
-        shuffle: bool = True,
-        rng: np.random.Generator = np.random.default_rng()
-    ):
-        super().__init__(
-            batch_size=batch_size,
-            batches_per_epoch=batches_per_epoch,
-            shuffle=shuffle,
-            rng=rng
-        )
-        fasta_samples, taxonomy_dbs = zip(*fasta_taxonomy_pairs)
-        self.sample_sampler = SampleSampler(cast(tuple[FastaSample, ...], fasta_samples))
-        self.sequence_sampler = SequenceSampler(sequence_length, augment_slide)
-        self.taxonomy_dbs: tuple[taxonomy.TaxonomyDb, ...] = cast(Any, taxonomy_dbs)
-        self.kmer = kmer
-        self.subsample_size = subsample_size
-        self.augment_ambiguous_bases = augment_ambiguous_bases
-        self.labels_as_dict = labels_as_dict
-        self.include_missing = include_missing
-        self.balance = balance
-        if taxonomy_hierarchy is None:
-            self.hierarchy = taxonomy.TaxonomyHierarchy.from_dbs(self.taxonomy_dbs, taxonomy_depth)
-        else:
-            self.hierarchy = taxonomy_hierarchy
+# class SequenceTaxonomyGenerator(BatchGenerator):
+#     def __init__(
+#         self,
+#         fasta_taxonomy_pairs: Iterable[tuple[FastaSample, taxonomy.TaxonomyDb]],
+#         sequence_length: int,
+#         kmer: int = 1,
+#         taxonomy_depth: int = 6,
+#         taxonomy_hierarchy: Optional[taxonomy.TaxonomyHierarchy] = None,
+#         subsample_size: int|None = None,
+#         batch_size: int = 32,
+#         batches_per_epoch: int = 100,
+#         augment_slide: bool = True,
+#         augment_ambiguous_bases: bool = True,
+#         labels_as_dict: bool = False,
+#         include_missing: bool = True,
+#         balance: bool = False,
+#         shuffle: bool = True,
+#         rng: np.random.Generator = np.random.default_rng()
+#     ):
+#         super().__init__(
+#             batch_size=batch_size,
+#             batches_per_epoch=batches_per_epoch,
+#             shuffle=shuffle,
+#             rng=rng
+#         )
+#         fasta_samples, taxonomy_dbs = zip(*fasta_taxonomy_pairs)
+#         self.sample_sampler = SampleSampler(cast(tuple[FastaSample, ...], fasta_samples))
+#         self.sequence_sampler = SequenceSampler(sequence_length, augment_slide)
+#         self.taxonomy_dbs: tuple[taxonomy.TaxonomyDb, ...] = cast(Any, taxonomy_dbs)
+#         self.kmer = kmer
+#         self.subsample_size = subsample_size
+#         self.augment_ambiguous_bases = augment_ambiguous_bases
+#         self.labels_as_dict = labels_as_dict
+#         self.include_missing = include_missing
+#         self.balance = balance
+#         if taxonomy_hierarchy is None:
+#             self.hierarchy = taxonomy.TaxonomyHierarchy.from_dbs(self.taxonomy_dbs, taxonomy_depth)
+#         else:
+#             self.hierarchy = taxonomy_hierarchy
 
-    @property
-    def sequence_length(self) -> int:
-        return self.sequence_sampler.sequence_length
+#     @property
+#     def sequence_length(self) -> int:
+#         return self.sequence_sampler.sequence_length
 
-    def generate_batch(
-        self,
-        rng: np.random.Generator
-    ) -> tuple[
-        npt.NDArray[np.int32],
-        dict[str, npt.NDArray[np.int32]]|tuple[npt.NDArray[np.int32], ...]
-    ]:
-        subsample_size = self.subsample_size or 1
-        sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
-        labels = np.full((*sequences.shape, self.hierarchy.depth), -1,  dtype=np.int32)
-        samples = self.sample_sampler.sample_with_ids(self.batch_size, self.balance, rng)
-        for i, (sample_index, sample) in enumerate(samples):
-            taxonomy_db = self.taxonomy_dbs[sample_index]
-            fasta_ids, sequences[i] = zip(*self.sequence_sampler.sample_with_ids(
-                sample, subsample_size, rng))
-            for j, fasta_id in enumerate(fasta_ids):
-                labels[i,j] = self.hierarchy.tokenize(
-                    taxonomy_db.fasta_id_to_label(fasta_id),
-                    pad=True,
-                    include_missing=self.include_missing)
-        labels = labels.transpose(((2, 0, 1)))
-        sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
-        if self.subsample_size is None:
-            sequences = np.squeeze(sequences, axis=1) # type: ignore
-            labels = np.squeeze(labels, axis=2)
-        if self.kmer > 1:
-            sequences = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases)
-        if self.labels_as_dict:
-            labels = dict(zip(map(str.lower, taxonomy.RANKS), labels))
-        else:
-            labels = tuple(labels)
-        return sequences.astype(np.int32), labels
+#     def generate_batch(
+#         self,
+#         rng: np.random.Generator
+#     ) -> tuple[
+#         npt.NDArray[np.int32],
+#         dict[str, npt.NDArray[np.int32]]|tuple[npt.NDArray[np.int32], ...]
+#     ]:
+#         subsample_size = self.subsample_size or 1
+#         sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
+#         labels = np.full((*sequences.shape, self.hierarchy.depth), -1,  dtype=np.int32)
+#         samples = self.sample_sampler.sample_with_ids(self.batch_size, self.balance, rng)
+#         for i, (sample_index, sample) in enumerate(samples):
+#             taxonomy_db = self.taxonomy_dbs[sample_index]
+#             fasta_ids, sequences[i] = zip(*self.sequence_sampler.sample_with_ids(
+#                 sample, subsample_size, rng))
+#             for j, fasta_id in enumerate(fasta_ids):
+#                 labels[i,j] = self.hierarchy.tokenize(
+#                     taxonomy_db.fasta_id_to_label(fasta_id),
+#                     pad=True,
+#                     include_missing=self.include_missing)
+#         labels = labels.transpose(((2, 0, 1)))
+#         sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
+#         if self.subsample_size is None:
+#             sequences = np.squeeze(sequences, axis=1) # type: ignore
+#             labels = np.squeeze(labels, axis=2)
+#         if self.kmer > 1:
+#             sequences = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases)
+#         if self.labels_as_dict:
+#             labels = dict(zip(map(str.lower, taxonomy.RANKS), labels))
+#         else:
+#             labels = tuple(labels)
+#         return sequences.astype(np.int32), labels
 
 
 _T = TypeVar("_T")

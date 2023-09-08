@@ -7,8 +7,10 @@ from ..losses import SparseCategoricalCrossentropyWithIgnoreClass
 from ..metrics import SparseCategoricalAccuracyWithIgnoreClass
 from ..registry import CustomObject
 from ..utils import encapsulate_model
+from ...data.tokenizers import AbstractTaxonomyTokenizer, NaiveTaxonomyTokenizer, TopDownTaxonomyTokenizer
 
 ModelType = TypeVar("ModelType", bound=tf.keras.Model)
+TokenizerType = TypeVar("TokenizerType", bound=AbstractTaxonomyTokenizer)
 
 @CustomObject
 class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelType]):
@@ -58,40 +60,42 @@ class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelT
         return super().from_config(config)
 
 
-@CustomObject
-class NaiveHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelType]): # [tf.Tensor, tuple[tf.Tensor, ...]]
-    def __init__(
-        self,
-        base: ModelType,
-        hierarchy: taxonomy.TaxonomyHierarchy,
-        include_missing: bool = True,
-        **kwargs
-    ):
+class AbstractHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelType, TokenizerType]):
+    def __init__(self, base: ModelType, taxonomy_tokenizer: TokenizerType, **kwargs):
         super().__init__(**kwargs)
         self.base = base
-        self.hierarchy = hierarchy
-        self.include_missing = include_missing
-        self.model = self.build_model()
+        self.taxonomy_tokenizer = taxonomy_tokenizer
 
     def default_loss(self):
-        return SparseCategoricalCrossentropyWithIgnoreClass(
-            from_logits=False,
-            ignore_class=(None if self.include_missing else -1)
+        return tf.keras.losses.SparseCategoricalCrossentropy(
+            from_logits=False
         )
 
     def default_metrics(self):
-        return [
-            SparseCategoricalAccuracyWithIgnoreClass(
-                ignore_class=(None if self.include_missing else -1)
-            )
-        ]
+        return [tf.keras.metrics.SparseCategoricalAccuracy()]
 
+    def build_model(self):
+        raise NotImplementedError()
+
+    def get_config(self):
+        return super().get_config() | {
+            "base": self.base,
+            "taxonomy_tokenizer": self.taxonomy_tokenizer.serialize().decode(),
+        }
+
+    @classmethod
+    def from_config(cls, config):
+        raise NotImplementedError()
+
+
+@CustomObject
+class NaiveHierarchicalTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificationModel[ModelType, NaiveTaxonomyTokenizer]): # [tf.Tensor, tuple[tf.Tensor, ...]]
     def build_model(self):
         x, y = encapsulate_model(self.base)
         outputs = []
-        for i in range(self.hierarchy.depth):
+        for i in range(self.taxonomy_tokenizer.depth):
             dense = tf.keras.layers.Dense(
-                self.hierarchy.taxon_counts[i] + int(self.include_missing),
+                len(self.taxonomy_tokenizer.id_to_taxons_map[i]),
                 name=taxonomy.RANKS[i].lower() + "_projection")
             outputs.append(dense(y))
         outputs = [
@@ -100,16 +104,9 @@ class NaiveHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel, Ge
         ]
         return tf.keras.Model(x, outputs)
 
-    def get_config(self):
-        return super().get_config() | {
-            "base": self.base,
-            "hierarchy": self.hierarchy.serialize().decode(),
-            "include_missing": self.include_missing,
-        }
-
     @classmethod
     def from_config(cls, config):
-        config["hierarchy"] = taxonomy.TaxonomyHierarchy.deserialize(config["hierarchy"])
+        config["taxonomy_tokenizer"] = NaiveTaxonomyTokenizer.deserialize(config["taxonomy_tokenizer"])
         return super().from_config(config)
 
 
@@ -125,60 +122,51 @@ class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationM
         x, y = encapsulate_model(self.base)
         prev = y
         outputs = []
-        for i in range(self.hierarchy.depth):
+        taxon_counts = [len(m) for m in self.taxonomy_tokenizer.id_to_taxons_map]
+        for i in range(self.taxonomy_tokenizer.depth):
             rank = taxonomy.RANKS[i].lower()
-            out = tf.keras.layers.Dense(
-                self.hierarchy.taxon_counts[i] + int(self.include_missing),
-                name=rank)(prev)
+            out = tf.keras.layers.Dense(taxon_counts[i], name=rank)(prev)
             outputs.append(out)
             in_help = outputs.copy()
             in_help.append(prev)
             prev = tf.keras.layers.Concatenate()(in_help)
+        outputs = [
+            tf.keras.layers.Activation("softmax", name=rank)(output)
+            for rank, output in zip(map(str.lower, taxonomy.RANKS), outputs)
+        ]
         return tf.keras.Model(x, outputs)
 
+    @classmethod
+    def from_config(cls, config):
+        config["taxonomy_tokenizer"] = NaiveTaxonomyTokenizer.deserialize(config["taxonomy_tokenizer"])
+        return super().from_config(config)
 
 @CustomObject
-class TopDownTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationModel):
+class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificationModel[ModelType, TopDownTaxonomyTokenizer]):
     def build_model(self):
-        assert self.include_missing is False, "TopDownTaxonomyClassificationModel does not currently support missing taxons."
-        taxon_counts_by_level = []
-        for i, taxons in enumerate(self.hierarchy.taxons[:-1]):
-            taxon_counts_by_level.append([])
-            for taxon in taxons:
-                taxon_counts_by_level[i].append(len(taxon.children))
+        gate_indices = []
+        for level in self.taxonomy_tokenizer.id_to_taxons_map[1:]:
+            indices = []
+            for taxon_hierarchy in level:
+                indices.append(self.taxonomy_tokenizer.taxons_to_id_map[taxon_hierarchy[:-1]])
+            gate_indices.append(indices)
 
         x, y = encapsulate_model(self.base)
         outputs = [
             tf.keras.layers.Dense(
-                self.hierarchy.taxon_counts[0],
-                name=f"{taxonomy.RANKS[0].lower()}")(y)
+                len(self.taxonomy_tokenizer.id_to_taxons_map[0]),
+                name=f"{taxonomy.RANKS[0].lower()}_linear")(y)
         ]
-        for i, taxon_counts in enumerate(taxon_counts_by_level, start=1):
+        for i in range(1, self.taxonomy_tokenizer.depth):
             # Use previous output to gate the next layer
-            gate_indices = [j for j, count in enumerate(taxon_counts) for _ in range(count)]
-            gate = tf.gather(outputs[-1], gate_indices, axis=-1)
-            gated_output = tf.keras.layers.Dense(
-                self.hierarchy.taxon_counts[i],
+            gate = tf.gather(outputs[i-1], gate_indices[i-1], axis=-1)
+            projection = tf.keras.layers.Dense(
+                len(self.taxonomy_tokenizer.id_to_taxons_map[i]),
                 name=f"{taxonomy.RANKS[i].lower()}_projection"
             )(y)
-            outputs.append(tf.keras.layers.Add(name=f"{taxonomy.RANKS[i].lower()}")([gated_output, gate]))
-        return tf.keras.Model(x, outputs)
-
-
-@CustomObject
-class TopDownConcatTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationModel):
-    def build_model(self):
-        x, y = encapsulate_model(self.base)
+            outputs.append(tf.keras.layers.Add(name=f"{taxonomy.RANKS[i].lower()}_linear")([projection, gate]))
         outputs = [
-            tf.keras.layers.Dense(
-                self.hierarchy.taxon_counts[0] + int(self.include_missing),
-                name=f"{taxonomy.RANKS[0].lower()}")(y)
+            tf.keras.layers.Activation("softmax", name=rank)(output)
+            for rank, output in zip(map(str.lower, taxonomy.RANKS), outputs)
         ]
-        for i, count in enumerate(self.hierarchy.taxon_counts[1:], start=1):
-            concat = tf.keras.layers.Concatenate()((y, outputs[-1]))
-            output = tf.keras.layers.Dense(
-                count + int(self.include_missing),
-                name=f"{taxonomy.RANKS[i].lower()}"
-            )(concat)
-            outputs.append(output)
         return tf.keras.Model(x, outputs)
