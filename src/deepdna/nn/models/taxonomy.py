@@ -83,10 +83,6 @@ class AbstractHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel,
             "taxonomy_tokenizer": self.taxonomy_tokenizer.serialize().decode(),
         }
 
-    @classmethod
-    def from_config(cls, config):
-        raise NotImplementedError()
-
 
 @CustomObject
 class NaiveHierarchicalTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificationModel[ModelType, NaiveTaxonomyTokenizer]): # [tf.Tensor, tuple[tf.Tensor, ...]]
@@ -106,7 +102,8 @@ class NaiveHierarchicalTaxonomyClassificationModel(AbstractHierarchicalTaxonomyC
 
     @classmethod
     def from_config(cls, config):
-        config["taxonomy_tokenizer"] = NaiveTaxonomyTokenizer.deserialize(config["taxonomy_tokenizer"])
+        if isinstance(config["taxonomy_tokenizer"], str):
+            config["taxonomy_tokenizer"] = NaiveTaxonomyTokenizer.deserialize(config["taxonomy_tokenizer"])
         return super().from_config(config)
 
 
@@ -122,10 +119,10 @@ class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationM
         x, y = encapsulate_model(self.base)
         prev = y
         outputs = []
-        taxon_counts = [len(m) for m in self.taxonomy_tokenizer.id_to_taxons_map]
+        taxon_counts = [len(m) for m in self.taxonomy_tokenizer.id_to_taxon_map]
         for i in range(self.taxonomy_tokenizer.depth):
             rank = taxonomy.RANKS[i].lower()
-            out = tf.keras.layers.Dense(taxon_counts[i], name=rank)(prev)
+            out = tf.keras.layers.Dense(taxon_counts[i], name=rank + "_linear")(prev)
             outputs.append(out)
             in_help = outputs.copy()
             in_help.append(prev)
@@ -138,7 +135,8 @@ class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationM
 
     @classmethod
     def from_config(cls, config):
-        config["taxonomy_tokenizer"] = NaiveTaxonomyTokenizer.deserialize(config["taxonomy_tokenizer"])
+        if isinstance(config["taxonomy_tokenizer"], str):
+            config["taxonomy_tokenizer"] = NaiveTaxonomyTokenizer.deserialize(config["taxonomy_tokenizer"])
         return super().from_config(config)
 
 @CustomObject
@@ -170,3 +168,9 @@ class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificat
             for rank, output in zip(map(str.lower, taxonomy.RANKS), outputs)
         ]
         return tf.keras.Model(x, outputs)
+
+    @classmethod
+    def from_config(cls, config):
+        if isinstance(config["taxonomy_tokenizer"], str):
+            config["taxonomy_tokenizer"] = TopDownTaxonomyTokenizer.deserialize(config["taxonomy_tokenizer"])
+        return super().from_config(config)

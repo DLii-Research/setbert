@@ -1,10 +1,21 @@
 import abc
 from dnadb import taxonomy
+from dnadb.utils import sort_dict
+import json
 import numpy as np
 import numpy.typing as npt
 from typing import Iterable
 
 class AbstractTaxonomyTokenizer(abc.ABC):
+
+    @classmethod
+    def deserialize(cls, taxonomy_tokenizer_bytes: str|bytes):
+        deserialized = json.loads(taxonomy_tokenizer_bytes)
+        tokenizer = cls(deserialized["depth"])
+        tokenizer.tree = deserialized["tree"]
+        tokenizer._is_dirty = True
+        return tokenizer
+
     """
     A generic taxonomy tokenizer that provides common method implementations.
     """
@@ -53,6 +64,12 @@ class AbstractTaxonomyTokenizer(abc.ABC):
                 sort_dict(children)
                 s.append((next_taxons, children))
             stack += reversed(s)
+
+    def serialize(self):
+        return bytes(json.dumps({
+            "depth": self.depth,
+            "tree": self.tree
+        }).encode())
 
     def tokenize_label(self, label: str) -> npt.NDArray[np.int32]:
         """
