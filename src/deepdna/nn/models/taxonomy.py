@@ -167,7 +167,7 @@ class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificat
             tf.keras.layers.Activation("softmax", name=rank)(output)
             for rank, output in zip(map(str.lower, taxonomy.RANKS), outputs)
         ]
-        return tf.keras.Model(x, outputs)
+        return tf.keras.Model(x, outputs[-1])
 
     @classmethod
     def from_config(cls, config):
