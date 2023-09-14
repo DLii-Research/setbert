@@ -1,4 +1,7 @@
+import abc
 from dnadb import taxonomy
+import numpy as np
+import numpy.typing as npt
 import tensorflow as tf
 from typing import Generic, Optional, TypeVar
 
@@ -12,8 +15,24 @@ from ...data.tokenizers import AbstractTaxonomyTokenizer, NaiveTaxonomyTokenizer
 ModelType = TypeVar("ModelType", bound=tf.keras.Model)
 TokenizerType = TypeVar("TokenizerType", bound=AbstractTaxonomyTokenizer)
 
+class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel):
+    @abc.abstractmethod
+    def predictions_to_labels(self, y_pred):
+        """
+        Convert the model's prediction output to string taxonomy labels.
+        """
+        return NotImplemented
+
+    def classify(self, inputs: tf.Tensor, batch_size: int = 32, verbose: int = 1) -> npt.NDArray[str]:
+        """
+        Classify the given DNA sequences to string taxonomy labels.
+        """
+        y_pred = self.predict(inputs, batch_size=batch_size, verbose=verbose)
+        return self.predictions_to_labels(y_pred)
+
+
 @CustomObject
-class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelType]):
+class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel, Generic[ModelType]):
     def __init__(
         self,
         base: ModelType,
@@ -39,6 +58,18 @@ class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelT
         model = tf.keras.Model(x, y)
         return model
 
+    def predictions_to_labels(self, y_pred):
+        """
+        Convert the model's prediction output to string taxonomy labels.
+        """
+        result = []
+        for y in y_pred:
+            if y.ndim == 1:
+                result.append(self.taxonomy_id_map.id_to_label(np.argmax(y)))
+            else:
+                result.append(self.predictions_to_labels(group))
+        return np.array(result)
+
     def __call__(
         self,
         inputs: tf.Tensor,
@@ -60,7 +91,7 @@ class NaiveTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelT
         return super().from_config(config)
 
 
-class AbstractHierarchicalTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelType, TokenizerType]):
+class AbstractHierarchicalTaxonomyClassificationModel(AbstractTaxonomyClassificationModel, Generic[ModelType, TokenizerType]):
     def __init__(self, base: ModelType, taxonomy_tokenizer: TokenizerType, **kwargs):
         super().__init__(**kwargs)
         self.base = base
@@ -133,6 +164,28 @@ class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationM
         ]
         return tf.keras.Model(x, outputs)
 
+    def _prediction_to_label(self, y_pred: tuple[tf.Tensor, ...]|tuple[npt.NDArray[np.float32], ...]):
+        head = self.taxonomy_tokenizer.tree
+        constrained_indices = np.array([self.taxonomy_tokenizer.taxon_to_id_map[0][k] for k in head.keys()])
+        taxons = []
+        for rank, rank_pred in enumerate(y_pred):
+            taxon_id = (constrained_indices[np.argmax(rank_pred[constrained_indices])])
+            taxon = self.taxonomy_tokenizer.id_to_taxon_map[rank][taxon_id]
+            taxons.append(taxon)
+            if rank < self.taxonomy_tokenizer.depth:
+                head = head[taxon]
+                constrained_indices = np.array([self.taxonomy_tokenizer.taxon_to_id_map[rank+1][k] for k in head.keys()])
+        return taxonomy.join_taxonomy(taxons)
+
+    def prediction_to_labels(self, y_pred: tuple[tf.Tensor, ...]):
+        result = []
+        for group in zip(*y_pred):
+            if group[0].ndim == 1:
+                result.append(self._prediction_to_label(group))
+            else:
+                result.append(self.prediction_to_labels(group))
+        return np.array(result)
+
     @classmethod
     def from_config(cls, config):
         if isinstance(config["taxonomy_tokenizer"], str):
@@ -141,6 +194,10 @@ class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationM
 
 @CustomObject
 class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificationModel[ModelType, TopDownTaxonomyTokenizer]):
+    def __init__(self, base: ModelType, taxonomy_tokenizer: TokenizerType, **kwargs):
+        super().__init__(base, taxonomy_tokenizer, **kwargs)
+        self._predictive_model: tf.keras.Model|None = None
+
     def build_model(self):
         gate_indices = []
         for level in self.taxonomy_tokenizer.id_to_taxons_map[1:]:
@@ -168,6 +225,23 @@ class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificat
             for rank, output in zip(map(str.lower, taxonomy.RANKS), outputs)
         ]
         return tf.keras.Model(x, outputs[-1])
+
+    @property
+    def predictive_model(self):
+        if self._predictive_model is None:
+            depth = self.taxonomy_tokenizer.depth
+            outputs = [self.model.layers[3*i + 2].output for i in range(depth)]
+            self._predictive_model = tf.keras.Model(self.input, outputs)
+        return self._predictive_model
+
+    def predictions_to_labels(self, y_pred: tuple[tf.Tensor, ...]):
+        result = []
+        for y in y_pred:
+            if y.ndim == 1:
+                result.append(taxonomy.join_taxonomy(self.taxonomy_tokenizer.id_to_taxons_map[-1][np.argmax(y)]))
+            else:
+                result.append(self.predictions_to_labels(group))
+        return np.array(result)
 
     @classmethod
     def from_config(cls, config):

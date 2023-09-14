@@ -127,7 +127,7 @@ class NaiveTaxonomyTokenizer(AbstractTaxonomyTokenizer):
         return result
 
     def detokenize_taxons(self, tokens: npt.NDArray[np.int32]):
-        return tuple(self._taxon_to_id_map[d][i] for d, i in enumerate(tokens))
+        return tuple(self.id_to_taxon_map[d][i] for d, i in enumerate(tokens))
 
     @property
     def id_to_taxon_map(self):
