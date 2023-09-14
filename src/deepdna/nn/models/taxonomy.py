@@ -177,13 +177,13 @@ class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationM
                 constrained_indices = np.array([self.taxonomy_tokenizer.taxon_to_id_map[rank+1][k] for k in head.keys()])
         return taxonomy.join_taxonomy(taxons)
 
-    def prediction_to_labels(self, y_pred: tuple[tf.Tensor, ...]):
+    def predictions_to_labels(self, y_pred: tuple[npt.NDArray[np.float32], ...]):
         result = []
-        for group in zip(*y_pred):
+        for group in zip(*map(np.array, y_pred)):
             if group[0].ndim == 1:
                 result.append(self._prediction_to_label(group))
             else:
-                result.append(self.prediction_to_labels(group))
+                result.append(self.predictions_to_labels(group))
         return np.array(result)
 
     @classmethod
