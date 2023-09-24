@@ -678,7 +678,7 @@ class ChunkedEmbeddingLayer(TypedLayer[[tf.Tensor], tf.Tensor]):
         self,
         layer: tf.keras.layers.Layer|tf.keras.models.Model,
         chunk_size: Optional[int] = None,
-        stop_gradient: bool = True,
+        stop_gradient: bool = False,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -695,8 +695,15 @@ class ChunkedEmbeddingLayer(TypedLayer[[tf.Tensor], tf.Tensor]):
         inputs = tf.reshape(inputs, (-1, original_shape[-1]))
         chunk_size = self.chunk_size
         if chunk_size is None:
-            chunk_size = tf.shape(inputs)[0]
-        result = subbatch_predict(self.layer, inputs, chunk_size, stop_gradient=self.stop_gradient)
+            result = self.layer(inputs, training=training)
+            if self.stop_gradient:
+                result = tf.stop_gradient(result)
+        else:
+            result = subbatch_predict(
+                self.layer,
+                inputs,
+                chunk_size,
+                stop_gradient=self.stop_gradient)
         return tf.reshape(result, tf.concat((original_shape[:-1], (-1,)), axis=0))
 
     def get_config(self):
