@@ -34,7 +34,7 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self.mha_layers = []
 
     def build_model(self):
-        y = x = tf.keras.layers.Input((self.max_set_len, self.embed_dim))
+        y = x = tf.keras.layers.Input((None, self.embed_dim))
         y = layers.InjectClassToken(self.embed_dim)(y)
         y = SetTransformerModel(self.embed_dim, self.num_heads, self.num_induce, self.stack, self.pre_layernorm)(y)
         return tf.keras.Model(x, y)
@@ -112,10 +112,10 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
                 return_num_masked=True,
                 return_embeddings=True)
             y = y[:,:num_masked,:]
-            loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
+            loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses) # type: ignore
         gradients = tape.gradient(loss, self.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
-        self.compiled_metrics.update_state(y, y_pred)
+        self.compiled_metrics.update_state(y, y_pred) # type: ignore
         return {m.name: m.result() for m in self.metrics}
 
     def test_step(self, batch):
@@ -125,8 +125,8 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
             return_num_masked=True,
             return_embeddings=True)
         y = y[:,:num_masked,:]
-        self.compiled_loss(y, y_pred, regularization_losses=self.losses)
-        self.compiled_metrics.update_state(y, y_pred)
+        self.compiled_loss(y, y_pred, regularization_losses=self.losses) # type: ignore
+        self.compiled_metrics.update_state(y, y_pred) # type: ignore
         return {m.name: m.result() for m in self.metrics}
 
     @property
