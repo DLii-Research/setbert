@@ -104,6 +104,9 @@ class DnaBertPretrainModel(ModelWrapper, CustomModel):
     def default_loss(self):
         return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
+    def default_metrics(self):
+        return tf.keras.metrics.SparseCategoricalAccuracy()
+
     def compute_output_shape(self, input_shape):
         return self.model.compute_output_shape(input_shape)
 
