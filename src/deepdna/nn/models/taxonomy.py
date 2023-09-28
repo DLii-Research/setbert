@@ -67,7 +67,7 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel, Gene
             if y.ndim == 1:
                 result.append(self.taxonomy_id_map.id_to_label(np.argmax(y)))
             else:
-                result.append(self.predictions_to_labels(group))
+                result.append(self.predictions_to_labels(y))
         return np.array(result)
 
     def __call__(
@@ -240,7 +240,7 @@ class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificat
             if y.ndim == 1:
                 result.append(taxonomy.join_taxonomy(self.taxonomy_tokenizer.id_to_taxons_map[-1][np.argmax(y)]))
             else:
-                result.append(self.predictions_to_labels(group))
+                result.append(self.predictions_to_labels(y))
         return np.array(result)
 
     @classmethod
