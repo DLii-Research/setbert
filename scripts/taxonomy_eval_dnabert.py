@@ -55,7 +55,6 @@ def main(context: dcs.Context):
         labels = model.classify(sequences, batch_size=config.batch_size, verbose=0)
         tax_tsv_path = (config.output_path / fasta_path.name).with_suffix(".tax.tsv")
         write_tax_tsv(tax_tsv_path, zip(ids, labels))
-        break
 
 
 if __name__ == "__main__":
