@@ -14,7 +14,7 @@ def define_arguments(context: dcs.Context):
     parser = context.argument_parser
 
     parser.add_argument("output_path", type=Path)
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--batch-size", type=int, default=512)
 
     wandb = context.get(dcs.module.Wandb)
     wandb.add_artifact_argument("model", required=True, description="The deep-learning model to use.")

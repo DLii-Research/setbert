@@ -51,7 +51,7 @@ def main(context: dcs.Context):
         batch_size = 1
     else:
         model.base.chunk_size = None
-        batch_size = config.chunk_size or 32
+        batch_size = config.chunk_size or 1000
 
     kmer = model.base.base.dnabert_encoder.base.kmer
 
