@@ -37,10 +37,7 @@ def main(context: dcs.Context):
         print("No FASTA files to process.")
         return
 
-    return
-
     wandb = context.get(dcs.module.Wandb)
-
     path = wandb.artifact_argument_path("model")
     model = load_model(path, taxonomy.AbstractTaxonomyClassificationModel)
     assert isinstance(model, taxonomy.AbstractTaxonomyClassificationModel)
