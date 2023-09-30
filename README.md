@@ -10,36 +10,29 @@ cd deep-dna
 pip3 install -e .
 ```
 
-## Model Types
+## Dataset Preparation
 
-### DNA Embeddings
+Start by specifying the data locations.
 
-- DNABERT
-- DNABERT Autoencoder
+```bash
+synthetic_data_path=~/Datasets/Synthetic
+```
 
-### GAN
+### Generating Synthetic Test Sets
 
-- Conditional GAN
-- Conditional WGAN
-- Conditional VEEGAN
-- Conditional VEEWGAN
-- Generative Adversarial Set Transformers (GAST)
+To generate a synthetic test set, use the `./scripts/dataset/generate_synthetic_test.py` utility script. The following produces a test set for the datasets used in this project.
 
-- DNAGAST
-- DNAWGAST
-- DNAVEEGAST
-- DNAVEEWGAST
-
-## Dependencies
-
-In order to run these models, you'll need to install the necessary dependencies from my other repositories linked below.
-
-- [lmdbm-lockable](https://github.com/SirDavidLudwig/lmdb-python-dbm)
-- [Tensorflow](https://www.tensorflow.org/)
-- [tf-utilities](https://pypi.org/project/tf-utilities/)
-- [tf-settransformer](https://pypi.org/project/tf-settransformer/)
-- [Weights & Biases](https://wandb.ai)
-
-## Training & Evaluation
-
-Each model architecture can me trained/evaluated by invoking the appropriate script located in the `scripts/` directory. These scripts integrate the Weights & Biases platform directly for easy version control, thus W&B must be configured appropriately on your system before execution.
+```bash
+for dataset in Hopland Nachusa SFD Wetland; do
+    for synthetic_classifier in Naive Bertax Topdown; do
+        for distribution in natural uniform; do
+            echo "Dataset: $dataset, Synthetic Classifier: $synthetic_classifier, Distribution: $distribution"
+            python3 ./scripts/dataset/generate_synthetic_test.py \
+                --synthetic-data-path $synthetic_data_path \
+                --dataset $dataset \
+                --synthetic-classifier $synthetic_classifier \
+                --distribution $distribution
+        done
+    done
+done
+```
