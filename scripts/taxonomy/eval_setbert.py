@@ -5,13 +5,13 @@ from pathlib import Path
 from tqdm.auto import tqdm
 
 from deepdna.nn.models import load_model, taxonomy
-import common
+import _common
 
 
 def define_arguments(context: dcs.Context):
     parser = context.argument_parser
 
-    common.dataset_args(parser)
+    _common.dataset_args(parser)
 
     group = parser.add_argument_group("Job")
     group.add_argument("--output-path", type=Path, required=True)
@@ -25,8 +25,8 @@ def define_arguments(context: dcs.Context):
 def main(context: dcs.Context):
     config = context.config
 
-    output_path = common.make_output_path(config)
-    fastas = common.find_fastas_to_process(
+    output_path = _common.make_output_path(config)
+    fastas = _common.find_fastas_to_process(
         config.synthetic_data_path,
         config.dataset,
         config.synthetic_classifier,
@@ -52,7 +52,7 @@ def main(context: dcs.Context):
     kmer = model.base.base.dnabert_encoder.base.kmer
 
     for fasta_path in tqdm(fastas):
-        ids, sequences = zip(*common.read_fasta(fasta_path))
+        ids, sequences = zip(*_common.read_fasta(fasta_path))
         sequences = list(map(dna.encode_sequence, sequences))
         sequences = dna.encode_kmers(np.array(sequences), kmer)
         sequences = np.expand_dims(sequences, 0)
@@ -61,7 +61,7 @@ def main(context: dcs.Context):
             sequences = np.transpose(sequences, (1, 0, 2))
         labels = model.classify(sequences, batch_size=batch_size, verbose=0).flatten()
         tax_tsv_path = (output_path / fasta_path.name).with_suffix(".tax.tsv")
-        common.write_tax_tsv(tax_tsv_path, zip(ids, labels))
+        _common.write_tax_tsv(tax_tsv_path, zip(ids, labels))
 
 
 if __name__ == "__main__":

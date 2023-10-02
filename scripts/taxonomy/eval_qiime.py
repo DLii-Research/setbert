@@ -4,7 +4,7 @@ from pathlib import Path
 from sklearn.pipeline import Pipeline
 from tqdm.contrib.concurrent import process_map
 
-import common
+import _common
 
 config: argparse.Namespace
 model: Pipeline
@@ -12,7 +12,7 @@ model: Pipeline
 def define_arguments():
     parser = argparse.ArgumentParser()
 
-    common.dataset_args(parser)
+    _common.dataset_args(parser)
 
     group = parser.add_argument_group("Job")
     group.add_argument("--output-path", type=Path, required=True)
@@ -26,18 +26,18 @@ def run(fasta_path):
     global config
     global model
     fasta_path = fasta_path
-    ids, sequences = zip(*common.read_fasta(fasta_path))
+    ids, sequences = zip(*_common.read_fasta(fasta_path))
     labels = model.predict(sequences)
     tax_tsv_path = (config.output_path / fasta_path.name).with_suffix(".tax.tsv")
-    common.write_tax_tsv(tax_tsv_path, zip(ids, labels))
+    _common.write_tax_tsv(tax_tsv_path, zip(ids, labels))
 
 
 def main():
     global config
     global model
 
-    output_path = common.make_output_path(config)
-    fastas = common.find_fastas_to_process(
+    output_path = _common.make_output_path(config)
+    fastas = _common.find_fastas_to_process(
         config.synthetic_data_path,
         config.dataset,
         config.synthetic_classifier,
