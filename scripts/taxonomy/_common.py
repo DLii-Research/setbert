@@ -11,7 +11,7 @@ def dataset_args(parser: argparse.ArgumentParser):
 
 def make_output_path(config: argparse.Namespace):
     Path(config.output_path).mkdir(exist_ok=True)
-    output_path = config.output_path / config.dataset / config.synthetic_classifier
+    output_path = config.output_path / config.dataset / config.synthetic_classifier / config.distribution
     output_path.mkdir(exist_ok=True, parents=True)
     return output_path
 

@@ -44,6 +44,8 @@ def main(context: dcs.Context):
     kmer = model.base.base.kmer
 
     for fasta_path in tqdm(fastas):
+        if not context.is_running:
+            return
         ids, sequences = zip(*_common.read_fasta(fasta_path))
         sequences = list(map(dna.encode_sequence, sequences))
         sequences = dna.encode_kmers(np.array(sequences), kmer)
