@@ -27,7 +27,7 @@ def find_fastas_to_process(
     if distribution == "uniform":
         path /= "test-uniform"
     else:
-        path /= "test"
+        path /= "test-natural"
     existing = set([f.name for f in output_path.iterdir() if f.name.endswith(".tax.tsv")])
     return set([f for f in path.iterdir() if f.name.endswith(".fasta") and f.with_suffix(".tax.tsv").name not in existing])
 

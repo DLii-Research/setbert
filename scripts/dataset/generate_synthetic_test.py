@@ -32,6 +32,7 @@ def define_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--synthetic-classifier", type=str, required=True)
     parser.add_argument("--distribution", type=str, choices=["uniform", "natural"], required=True)
+    parser.add_argument("--sequence-length", type=int, default=150)
     parser.add_argument("--num-subsamples", type=int, default=10)
     parser.add_argument("--subsample-size", type=int, default=1000)
     parser.add_argument('--seed', type=int, default=None)
@@ -103,10 +104,13 @@ def main(context: dcs.Context):
 
             # Write output files
             with open(output_fasta, "w") as out_fasta, open(output_tax_tsv, "w") as out_tax:
+                fasta_writer = FastaEntryWriter(config.sequence_length, prefix=f"{name}", rng=rng)
+                labels = [tax_db.fasta_id_to_label(entry.identifier) for entry in entries]
+                entries = list(map(fasta_writer, entries))
                 fasta.write(out_fasta, entries)
                 taxonomy.write(out_tax, [
-                    taxonomy.TaxonomyEntry(entry.identifier, tax_db.fasta_id_to_label(entry.identifier))
-                    for entry in entries])
+                    taxonomy.TaxonomyEntry(entry.identifier, label)
+                    for entry, label in zip(entries, labels)])
 
 
 if __name__ == "__main__":
