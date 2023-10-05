@@ -1,5 +1,5 @@
 # Synthetic Data Directory
-synthetic_data_path=~/Datasets/Synthetic
+synthetic_data_path=~/work/Datasets/Synthetic
 
 # Models -------------------------------------------------------------------------------------------
 

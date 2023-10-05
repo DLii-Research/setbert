@@ -31,7 +31,7 @@ def define_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--synthetic-data-path", type=Path, required=True)
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--synthetic-classifier", type=str, required=True)
-    parser.add_argument("--distribution", type=str, choices=["uniform", "natural"], required=True)
+    parser.add_argument("--distribution", type=str, choices=["presence-absence", "natural"], required=True)
     parser.add_argument("--sequence-length", type=int, default=150)
     parser.add_argument("--num-subsamples", type=int, default=10)
     parser.add_argument("--subsample-size", type=int, default=1000)
@@ -49,12 +49,17 @@ def main(context: dcs.Context):
     sequences_index = fasta.FastaIndexDb(config.synthetic_data_path / "Synthetic.fasta.index.db")
     tax_db = taxonomy.TaxonomyDb(config.synthetic_data_path / "Synthetic.tax.tsv.db")
 
+    if config.distribution == "presence-absence":
+        sample_mode = sample.SampleMode.PresenceAbsence
+    else:
+        sample_mode = sample.SampleMode.Natural
+
     # Load the multiplexed samples
     samples = sample.load_multiplexed_fasta(
         sequences_fasta,
         dataset_path / f"{config.dataset}.fasta.mapping.db",
-        sequences_index
-    )
+        sequences_index,
+        sample_mode=sample_mode)
 
     # n_pad_zeros = int(np.ceil(np.log10(config.num_subsamples)))
     n_pad_zeros = 3
@@ -63,7 +68,6 @@ def main(context: dcs.Context):
     rng = np.random.default_rng(config.seed)
     for s in tqdm(samples):
         name = s.name.replace(".fastq", "").replace(".fasta", "")
-        fasta_ids_by_label = None
         for i in trange(config.num_subsamples, leave=False, desc=f"{name}"):
             # Watch for early termination to exit safely
             if not context.is_running:
@@ -77,30 +81,8 @@ def main(context: dcs.Context):
             if output_fasta.exists() and output_tax_tsv.exists():
                 continue
 
-            if fasta_ids_by_label is None:
-                fasta_ids_by_label = {}
-                for index in s.sample_mapping.indices:
-                    fasta_id = sequences_index.index_to_fasta_id(index)
-                    label_index = tax_db.fasta_id_to_index(fasta_id)
-                    if label_index not in fasta_ids_by_label:
-                        fasta_ids_by_label[label_index] = set()
-                    fasta_ids_by_label[label_index].add(fasta_id)
-                fasta_ids_by_label = dict(zip(fasta_ids_by_label.keys(), map(list, fasta_ids_by_label.values())))
-
             # Grab sequence entries
-            if config.distribution == "natural":
-                entries = list(s.sample(config.subsample_size, rng=rng))
-            elif config.distribution == "uniform":
-                label_indices = rng.choice(
-                    list(fasta_ids_by_label.keys()),
-                    config.subsample_size,
-                    replace=True)
-                entries = []
-                for label_index in label_indices:
-                    fasta_id = rng.choice(fasta_ids_by_label[label_index])
-                    entries.append(sequences_fasta[fasta_id])
-            else:
-                raise ValueError(f"Unknown distribution {config.distribution}")
+            entries = list(s.sample(config.subsample_size, rng=rng))
 
             # Write output files
             with open(output_fasta, "w") as out_fasta, open(output_tax_tsv, "w") as out_tax:
