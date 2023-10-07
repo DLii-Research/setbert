@@ -6,8 +6,6 @@ import tensorflow as tf
 from typing import Generic, Optional, TypeVar
 
 from .custom_model import ModelWrapper, CustomModel
-from ..losses import SparseCategoricalCrossentropyWithIgnoreClass
-from ..metrics import SparseCategoricalAccuracyWithIgnoreClass
 from ..registry import CustomObject
 from ..utils import encapsulate_model
 from ...data.tokenizers import AbstractTaxonomyTokenizer, NaiveTaxonomyTokenizer, TopDownTaxonomyTokenizer
@@ -23,7 +21,12 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel):
         """
         return NotImplemented
 
-    def classify(self, inputs: tf.Tensor, batch_size: int = 32, verbose: int = 1) -> npt.NDArray[str]:
+    def classify(
+        self,
+        inputs: tf.Tensor|npt.NDArray[np.int32]|npt.NDArray[np.int64],
+        batch_size: int = 32,
+        verbose: str = "auto"
+    ) -> npt.NDArray[np.str_]:
         """
         Classify the given DNA sequences to string taxonomy labels.
         """
@@ -122,7 +125,7 @@ class NaiveHierarchicalTaxonomyClassificationModel(AbstractHierarchicalTaxonomyC
         outputs = []
         for i in range(self.taxonomy_tokenizer.depth):
             dense = tf.keras.layers.Dense(
-                len(self.taxonomy_tokenizer.id_to_taxons_map[i]),
+                len(self.taxonomy_tokenizer.id_to_taxon_map[i]),
                 name=taxonomy.RANKS[i].lower() + "_projection")
             outputs.append(dense(y))
         outputs = [
@@ -194,7 +197,7 @@ class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationM
 
 @CustomObject
 class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificationModel[ModelType, TopDownTaxonomyTokenizer]):
-    def __init__(self, base: ModelType, taxonomy_tokenizer: TokenizerType, **kwargs):
+    def __init__(self, base: ModelType, taxonomy_tokenizer: TopDownTaxonomyTokenizer, **kwargs):
         super().__init__(base, taxonomy_tokenizer, **kwargs)
         self._predictive_model: tf.keras.Model|None = None
 
