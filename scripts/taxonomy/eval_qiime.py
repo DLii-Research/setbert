@@ -1,3 +1,5 @@
+#!/opt/conda/envs/qiime2-2022.8/bin/python3
+
 import argparse
 import joblib
 from pathlib import Path
@@ -37,12 +39,12 @@ def main():
     global model
 
     output_path = _common.make_output_path(config)
-    fastas = _common.find_fastas_to_process(
+    fastas = list(_common.find_fastas_to_process(
         config.synthetic_data_path,
         config.dataset,
         config.synthetic_classifier,
         config.distribution,
-        output_path)
+        output_path))
 
     if len(fastas) == 0:
         print("No FASTA files to process.")

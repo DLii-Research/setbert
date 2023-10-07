@@ -11,7 +11,7 @@ def dataset_args(parser: argparse.ArgumentParser):
 
 def make_output_path(config: argparse.Namespace):
     Path(config.output_path).mkdir(exist_ok=True)
-    output_path = config.output_path / config.dataset / config.synthetic_classifier / config.distribution
+    output_path = config.output_path / config.distribution / config.dataset / config.synthetic_classifier
     output_path.mkdir(exist_ok=True, parents=True)
     return output_path
 
@@ -23,9 +23,11 @@ def find_fastas_to_process(
     distribution: str,
     output_path
 ):
-    path = synthetic_data_path / dataset / synthetic_classifier / f"test-{distribution}"
-    existing = set([f.name for f in output_path.iterdir() if f.name.endswith(".tax.tsv")])
-    return set([f for f in path.iterdir() if f.name.endswith(".fasta") and f.with_suffix(".tax.tsv").name not in existing])
+    path = synthetic_data_path / "test" / distribution / dataset / synthetic_classifier
+    for fasta in path.iterdir():
+        if (output_path / fasta.with_suffix(".tax.tsv").name).exists():
+            continue
+        yield fasta
 
 
 def read_fasta(path: Path):

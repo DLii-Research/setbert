@@ -1,31 +1,12 @@
+#!/bin/env python3
+
 import argparse
-from dataclasses import replace
 from dnadb import dna, fasta, taxonomy, sample
 import deepctx.scripting as dcs
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm, trange
-from typing import Optional
-
-class FastaEntryWriter:
-    def __init__(self, sequence_length: int, prefix: str = "", rng: Optional[np.random.Generator]=None):
-        if len(prefix) > 0:
-            prefix += "."
-        self.prefix = prefix
-        self.sequence_length = sequence_length
-        self.count = 0
-        self.rng = rng if rng is not None else np.random.default_rng()
-
-    def __call__(self, entry: fasta.FastaEntry):
-        offset = self.rng.integers(len(entry.sequence) - self.sequence_length)
-        entry = replace(
-            entry,
-            identifier=f"{self.prefix}{self.count:08d}",
-            sequence=dna.augment_ambiguous_bases(
-                entry.sequence[offset:offset + self.sequence_length], self.rng),
-            extra="")
-        self.count += 1
-        return entry
+from typing import Iterable
 
 def define_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--synthetic-data-path", type=Path, required=True)
@@ -37,13 +18,35 @@ def define_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--subsample-size", type=int, default=1000)
     parser.add_argument('--seed', type=int, default=None)
 
+
+def augment_sequence(sequence: str, sequence_length: int, rng: np.random.Generator):
+    offset = rng.integers(len(sequence) - sequence_length)
+    return dna.augment_ambiguous_bases(sequence[offset:offset + sequence_length], rng)
+
+def create_entries(
+    sample: sample.FastaSample,
+    tax_db: taxonomy.TaxonomyDb,
+    sequence_length: int,
+    subsample_size: int,
+    rng: np.random.Generator
+):
+    for i, entry in enumerate(sample.sample(subsample_size), start=1):
+        test_identifier = str(i)
+        test_sequence = augment_sequence(entry.sequence, sequence_length, rng)
+        tax_id = tax_db.fasta_id_to_index(entry.identifier)
+        yield fasta.FastaEntry(test_identifier, test_sequence, extra=str(tax_id))
+
 def main(context: dcs.Context):
     config = context.config
 
+    assert Path(config.synthetic_data_path).is_dir(), f"Invalid synthetic data path: {config.synthetic_data_path}"
+
     # Set up paths
     dataset_path = config.synthetic_data_path / config.dataset / config.synthetic_classifier
-    output_path = dataset_path / f"test-{config.distribution}"
-    output_path.mkdir(exist_ok=True)
+    output_path = config.synthetic_data_path / "test" / config.distribution / config.dataset / config.synthetic_classifier
+    output_path.mkdir(exist_ok=True, parents=True)
+
+    print("Making directory:", output_path)
 
     sequences_fasta = fasta.FastaDb(config.synthetic_data_path / "Synthetic.fasta.db")
     sequences_index = fasta.FastaIndexDb(config.synthetic_data_path / "Synthetic.fasta.index.db")
@@ -61,39 +64,25 @@ def main(context: dcs.Context):
         sequences_index,
         sample_mode=sample_mode)
 
-    # n_pad_zeros = int(np.ceil(np.log10(config.num_subsamples)))
-    n_pad_zeros = 3
-    entries: list[fasta.FastaEntry]
+    n_pad_zeros = int(np.ceil(np.log10(config.num_subsamples)))
 
     rng = np.random.default_rng(config.seed)
     for s in tqdm(samples):
-        name = s.name.replace(".fastq", "").replace(".fasta", "")
-        for i in trange(config.num_subsamples, leave=False, desc=f"{name}"):
+        for i in trange(config.num_subsamples, leave=False, desc=f"{s.name}"):
             # Watch for early termination to exit safely
             if not context.is_running:
                 return
 
-            # Get paths and check if we've already generated this subsample
-            output_base_path = output_path / f"{name}.{i+1:0{n_pad_zeros}d}"
-            output_fasta = Path(str(output_base_path) + ".fasta")
-            output_tax_tsv = Path(str(output_base_path) + ".tax.tsv")
-
-            if output_fasta.exists() and output_tax_tsv.exists():
+            # Create the output path
+            output_fasta = output_path / f"{s.name}.{i+1:0{n_pad_zeros}d}.fasta"
+            if output_fasta.exists():
                 continue
 
-            # Grab sequence entries
-            entries = list(s.sample(config.subsample_size, rng=rng))
-
             # Write output files
-            with open(output_fasta, "w") as out_fasta, open(output_tax_tsv, "w") as out_tax:
-                fasta_writer = FastaEntryWriter(config.sequence_length, prefix=f"{name}", rng=rng)
-                labels = [tax_db.fasta_id_to_label(entry.identifier) for entry in entries]
-                entries = list(map(fasta_writer, entries))
-                fasta.write(out_fasta, entries)
-                taxonomy.write(out_tax, [
-                    taxonomy.TaxonomyEntry(entry.identifier, label)
-                    for entry, label in zip(entries, labels)])
-
+            with open(output_fasta, "w") as out_fasta:
+                fasta.write(
+                    out_fasta,
+                    create_entries(s, tax_db, config.sequence_length, config.subsample_size, rng))
 
 if __name__ == "__main__":
     context = dcs.Context(main)

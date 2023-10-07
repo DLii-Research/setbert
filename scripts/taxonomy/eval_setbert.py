@@ -1,3 +1,5 @@
+#!/bin/env python3
+
 from dnadb import dna
 import deepctx.scripting as dcs
 import numpy as np
@@ -26,44 +28,45 @@ def main(context: dcs.Context):
     config = context.config
 
     output_path = _common.make_output_path(config)
-    fastas = _common.find_fastas_to_process(
+    fastas = list(_common.find_fastas_to_process(
         config.synthetic_data_path,
         config.dataset,
         config.synthetic_classifier,
         config.distribution,
-        output_path)
+        output_path))
 
     if len(fastas) == 0:
         print("No FASTA files to process.")
         return
 
-    wandb = context.get(dcs.module.Wandb)
-    path = wandb.artifact_argument_path("model")
-    model = load_model(path, taxonomy.AbstractTaxonomyClassificationModel)
-    assert isinstance(model, taxonomy.AbstractTaxonomyClassificationModel)
+    with context.get(dcs.module.Tensorflow).strategy().scope():
+        wandb = context.get(dcs.module.Wandb)
+        path = wandb.artifact_argument_path("model")
+        model = load_model(path, taxonomy.AbstractTaxonomyClassificationModel)
+        assert isinstance(model, taxonomy.AbstractTaxonomyClassificationModel)
 
-    if not config.single_sequence:
-        model.base.chunk_size = config.chunk_size
-        batch_size = 1
-    else:
-        model.base.chunk_size = None
-        batch_size = config.chunk_size or 1000
+        if not config.single_sequence:
+            model.base.chunk_size = config.chunk_size
+            batch_size = 1
+        else:
+            model.base.chunk_size = None
+            batch_size = config.chunk_size or 1000
 
-    kmer = model.base.base.dnabert_encoder.base.kmer
+        kmer = model.base.base.dnabert_encoder.base.kmer
 
-    for fasta_path in tqdm(fastas):
-        if not context.is_running:
-            return
-        ids, sequences = zip(*_common.read_fasta(fasta_path))
-        sequences = list(map(dna.encode_sequence, sequences))
-        sequences = dna.encode_kmers(np.array(sequences), kmer)
-        sequences = np.expand_dims(sequences, 0)
-        if config.single_sequence:
-            # Swap so it's 1,000 subsamples each containing 1 sequence
-            sequences = np.transpose(sequences, (1, 0, 2))
-        labels = model.classify(sequences, batch_size=batch_size, verbose=0).flatten()
-        tax_tsv_path = (output_path / fasta_path.name).with_suffix(".tax.tsv")
-        _common.write_tax_tsv(tax_tsv_path, zip(ids, labels))
+        for fasta_path in tqdm(fastas):
+            if not context.is_running:
+                return
+            ids, sequences = zip(*_common.read_fasta(fasta_path))
+            sequences = list(map(dna.encode_sequence, sequences))
+            sequences = dna.encode_kmers(np.array(sequences), kmer)
+            sequences = np.expand_dims(sequences, 0)
+            if config.single_sequence:
+                # Swap so it's 1,000 subsamples each containing 1 sequence
+                sequences = np.transpose(sequences, (1, 0, 2))
+            labels = model.classify(sequences, batch_size=batch_size, verbose=0).flatten()
+            tax_tsv_path = (output_path / fasta_path.name).with_suffix(".tax.tsv")
+            _common.write_tax_tsv(tax_tsv_path, zip(ids, labels))
 
 
 if __name__ == "__main__":
