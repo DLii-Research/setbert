@@ -74,7 +74,7 @@ def main(context: dcs.Context):
                 return
 
             # Create the output path
-            output_fasta = output_path / f"{s.name}.{i+1:0{n_pad_zeros}d}.fasta"
+            output_fasta = output_path / f"{s.name}.{i:0{n_pad_zeros}d}.fasta"
             if output_fasta.exists():
                 continue
 
