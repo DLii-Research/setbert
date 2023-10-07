@@ -6,6 +6,8 @@ import numpy as np
 import numpy.typing as npt
 from typing import Iterable
 
+TreeType = dict[str, "TreeType"]
+
 class AbstractTaxonomyTokenizer(abc.ABC):
 
     @classmethod
@@ -21,7 +23,7 @@ class AbstractTaxonomyTokenizer(abc.ABC):
     """
     def __init__(self, depth: int):
         self.depth = depth
-        self.tree = {}
+        self.tree: TreeType = {}
         self._is_dirty = False
 
     def add_label(self, label: str):
@@ -57,7 +59,6 @@ class AbstractTaxonomyTokenizer(abc.ABC):
         stack = [((), self.tree)]
         while len(stack) > 0:
             taxons, head = stack.pop()
-            depth = len(taxons)
             s = []
             for taxon, children in head.items():
                 next_taxons = taxons + (taxon,)
@@ -101,14 +102,14 @@ class AbstractTaxonomyTokenizer(abc.ABC):
 class NaiveTaxonomyTokenizer(AbstractTaxonomyTokenizer):
     def __init__(self, depth: int):
         super().__init__(depth)
-        self._id_to_taxon_map = None
-        self._taxon_to_id_map = None
+        self._id_to_taxon_map: list[list[str]]|None = None
+        self._taxon_to_id_map: list[dict[str, int]]|None = None
 
     def build(self):
         super().build()
         self._id_to_taxon_map = [[] for _ in range(self.depth)]
         self._taxon_to_id_map = [{} for _ in range(self.depth)]
-        q = [(0, self.tree)]
+        q: list[tuple[int, dict]] = [(0, self.tree)]
         while len(q) > 0:
             depth, tree = q.pop(0)
             id_to_taxon_map = self._id_to_taxon_map[depth]
@@ -130,15 +131,17 @@ class NaiveTaxonomyTokenizer(AbstractTaxonomyTokenizer):
         return tuple(self.id_to_taxon_map[d][i] for d, i in enumerate(tokens))
 
     @property
-    def id_to_taxon_map(self):
-        if self._is_dirty:
+    def id_to_taxon_map(self) -> list[list[str]]:
+        if self._id_to_taxon_map is None or self._is_dirty:
             self.build()
+            assert self._id_to_taxon_map is not None
         return self._id_to_taxon_map
 
     @property
-    def taxon_to_id_map(self):
-        if self._is_dirty:
+    def taxon_to_id_map(self) -> list[dict[str, int]]:
+        if self._taxon_to_id_map is None or self._is_dirty:
             self.build()
+            assert self._taxon_to_id_map is not None
         return self._taxon_to_id_map
 
 
@@ -182,7 +185,7 @@ class TopDownTaxonomyTokenizer(AbstractTaxonomyTokenizer):
         super().build()
         self._id_to_taxons_map = tuple([] for _ in range(self.depth))
         self._taxons_to_id_map = {}
-        stack = [((), self.tree)]
+        stack: list[tuple[tuple[str, ...], TreeType]] = [((), self.tree)]
         while len(stack) > 0:
             taxons, head = stack.pop()
             depth = len(taxons)
@@ -194,12 +197,14 @@ class TopDownTaxonomyTokenizer(AbstractTaxonomyTokenizer):
 
     @property
     def id_to_taxons_map(self) -> tuple[list[tuple[str, ...]], ...]:
-        if self._id_to_taxons_map is None:
+        if self._id_to_taxons_map is None or self._is_dirty:
             self.build()
+            assert self._id_to_taxons_map is not None
         return self._id_to_taxons_map
 
     @property
     def taxons_to_id_map(self) -> dict[tuple[str, ...], int]:
-        if self._taxons_to_id_map is None:
+        if self._taxons_to_id_map is None or self._is_dirty:
             self.build()
+            assert self._taxons_to_id_map is not None
         return self._taxons_to_id_map
