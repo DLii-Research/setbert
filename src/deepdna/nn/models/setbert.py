@@ -30,7 +30,6 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self.num_heads = num_heads
         self.num_induce = num_induce
         self.pre_layernorm = pre_layernorm
-        self.dnabert_encoder.trainable = False
         self.mha_layers = []
 
     def build_model(self):
