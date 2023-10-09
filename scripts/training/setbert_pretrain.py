@@ -79,7 +79,8 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
     print(f"Found {len(samples)} samples.")
     common_args = dict(
         sequence_length=sequence_length,
-        kmer=kmer)
+        kmer=kmer,
+        subsample_size=config.max_subsample_size)
     train_data = SequenceGenerator(
         samples,
         batch_size=config.batch_size,
