@@ -39,6 +39,14 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         y = SetTransformerModel(self.embed_dim, self.num_heads, self.num_induce, self.stack, self.pre_layernorm)(y)
         return tf.keras.Model(x, y)
 
+    @property
+    def kmer(self):
+        return self.dnabert_encoder.base.kmer
+
+    @property
+    def sequence_length(self):
+        return self.dnabert_encoder.base.sequence_length
+
     def __call__(
         self,
         inputs: tf.Tensor,
@@ -51,7 +59,6 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
             training=training,
             return_attention_scores=return_attention_scores,
             **kwargs)
-
 
     def get_config(self):
         return super().get_config() | {
@@ -137,6 +144,14 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
     def chunk_size(self, value):
         assert self.embed_layer is not None
         self.embed_layer.chunk_size = value
+
+    @property
+    def kmer(self):
+        return self.base.dnabert_encoder.base.kmer
+
+    @property
+    def sequence_length(self):
+        return self.base.dnabert_encoder.base.sequence_length
 
     def call(
         self,
@@ -247,6 +262,14 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
     def chunk_size(self, value):
         assert self.embed_layer is not None
         self.embed_layer.chunk_size = value
+
+    @property
+    def kmer(self):
+        return self.dnabert_encoder.base.kmer
+
+    @property
+    def sequence_length(self):
+        return self.dnabert_encoder.base.sequence_length
 
     def call(
         self,
