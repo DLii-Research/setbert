@@ -126,6 +126,7 @@ if __name__ == "__main__":
             epochs=None,
             steps_per_epoch=100,
             val_steps_per_epoch=20)
+    context.use(dcs.module.Rng)
     context.use(dcs.module.Wandb)
     define_arguments(context)
     context.execute()
