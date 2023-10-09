@@ -108,7 +108,15 @@ def main(context: dcs.Context):
             config,
             model.instance.sequence_length,
             model.instance.kmer)
-        context.get(dcs.module.Train).fit(model.instance, train_data, validation_data=val_data)
+        model.path("model").mkdir(exist_ok=True, parents=True)
+        context.get(dcs.module.Train).fit(
+            model.instance,
+            train_data,
+            validation_data=val_data,
+            callbacks=[
+                tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
+                context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger()
+            ])
 
     # Artifact logging
     if config.log_artifact is not None:
