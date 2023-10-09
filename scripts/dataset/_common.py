@@ -48,6 +48,7 @@ def build_multiplexed_fasta_db(fastq_files: list[Path], name: str, output_path: 
     prev: str = ""
     fasta_id_generator = count()
     for sequence in tqdm(heapq.merge(*map(open, sequence_file_ids.keys())), total=num_sequences):
+        sequence = sequence.rstrip()
         if sequence == prev:
             continue
         identifier = str(next(fasta_id_generator))
@@ -71,6 +72,7 @@ def build_multiplexed_fasta_db(fastq_files: list[Path], name: str, output_path: 
     fasta_entries = iter(fasta_db)
     fasta_entry = next(fasta_entries)
     for sequence, mapping in tqdm(heapq.merge(*[zip(f, repeat(mapping)) for f, mapping in zip(map(open, sequence_file_ids.keys()), mappings)]), total=num_sequences):
+        sequence = sequence.rstrip()
         if sequence != fasta_entry.sequence:
             fasta_entry = next(fasta_entries)
         assert sequence == fasta_entry.sequence
