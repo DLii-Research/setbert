@@ -49,7 +49,7 @@ def define_arguments(context: dcs.Context):
     group = parser.add_argument_group("Dataset Settings")
     group.add_argument("--datasets-path", type=Path, help="The path to the datasets directory.")
     group.add_argument("--datasets", type=lambda x: x.split(','), help="A comma-separated list of the datasets to use for training and validation.")
-    group.add_argument("--distribution", type=str, default="natural", choices=["natuarl", "presence-absence"], help="The distribution of the data to use for training and validation.")
+    group.add_argument("--distribution", type=str, default="natural", choices=["natural", "presence-absence"], help="The distribution of the data to use for training and validation.")
 
     group = parser.add_argument_group("Model Settings")
     group.add_argument("--embed-dim", type=int, default=64)
