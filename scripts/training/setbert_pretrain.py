@@ -55,7 +55,7 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--distribution", type=str, default="natural", choices=["natural", "presence-absence"], help="The distribution of the data to use for training and validation.")
 
     group = parser.add_argument_group("DNABERT Model Settings")
-    group.add_argument("--sequence-length", type=int, defualt=150)
+    group.add_argument("--sequence-length", type=int, default=150)
     group.add_argument("--kmer", type=int, default=3)
     group.add_argument("--dnabert-embed-dim", type=int, default=64)
     group.add_argument("--dnabert-stack", type=int, default=8)
