@@ -46,6 +46,7 @@ def define_arguments(context: dcs.Context):
     group = parser.add_argument_group("Dataset Settings")
     group.add_argument("--synthetic-dataset-path", type=Path, help="The path to the synthetic datasets directory.")
     group.add_argument("--datasets", type=lambda x: x.split(','), help="A comma-separated list of the datasets to use for training and validation.")
+    group.add_argument("--synthetic-classifier", type=str, default="Topdown", choices=["Naive", "Bertax", "Topdown"], help="The synthetic classifier used for generating the synthetic datasets.")
     group.add_argument("--distribution", type=str, default="natural", choices=["natural", "presence-absence"], help="The distribution of the data to use for training and validation.")
 
     group = parser.add_argument_group("Model Settings")
@@ -71,7 +72,7 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
     for dataset in config.datasets:
         samples += sample.load_multiplexed_fasta(
             synthetic_fasta,
-            config.synthetic_dataset_path / dataset / f"{dataset}.fasta.mapping.db",
+            config.synthetic_dataset_path / dataset / config.synthehtic_classifier / f"{dataset}.fasta.mapping.db",
             synthetic_fasta_index,
             sample.SampleMode.Natural if config.distribution == "natural" else sample.SampleMode.PresenceAbsence)
     print(f"Found {len(samples)} samples.")
