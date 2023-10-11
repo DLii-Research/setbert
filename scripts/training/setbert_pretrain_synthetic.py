@@ -72,7 +72,7 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
     for dataset in config.datasets:
         samples += sample.load_multiplexed_fasta(
             synthetic_fasta,
-            config.synthetic_dataset_path / dataset / config.synthehtic_classifier / f"{dataset}.fasta.mapping.db",
+            config.synthetic_dataset_path / dataset / config.synthetic_classifier / f"{dataset}.fasta.mapping.db",
             synthetic_fasta_index,
             sample.SampleMode.Natural if config.distribution == "natural" else sample.SampleMode.PresenceAbsence)
     print(f"Found {len(samples)} samples.")
