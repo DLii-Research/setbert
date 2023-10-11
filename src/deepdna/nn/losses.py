@@ -114,8 +114,8 @@ class FastSortedLoss(tf.keras.losses.Loss):
         self.loss_fn = loss_fn
 
     def call(self, y_true, y_pred, sample_weight=None):
-        y_true = tf.gather(y_true, tf.argsort(y_true[:,:,0], axis=1), axis=1)
-        y_pred = tf.gather(y_pred, tf.argsort(y_pred[:,:,0], axis=1), axis=1)
+        y_true = tf.squeeze(tf.gather(y_true, tf.argsort(y_true[:,:,0], axis=1), axis=1), )
+        y_pred = tf.squeeze(tf.gather(y_pred, tf.argsort(y_pred[:,:,0], axis=1), axis=1), 1)
         try:
             return self.loss_fn(y_true, y_pred, sample_weight=sample_weight)
         except TypeError:
@@ -125,8 +125,8 @@ class FastSortedLoss(tf.keras.losses.Loss):
 @CustomObject
 class SortedLoss(FastSortedLoss):
     def _step_body(self, i, y_true, y_pred, total_loss):
-        y_true_sorted = tf.gather(y_true, tf.argsort(y_true[:,:,i], axis=1), axis=1)
-        y_pred_sorted = tf.gather(y_pred, tf.argsort(y_pred[:,:,i], axis=1), axis=1)
+        y_true_sorted = tf.squeeze(tf.gather(y_true, tf.argsort(y_true[:,:,i], axis=1), axis=1), 1)
+        y_pred_sorted = tf.squeeze(tf.gather(y_pred, tf.argsort(y_pred[:,:,i], axis=1), axis=1), 1)
         # y_true_sorted = tf.sort(tf.roll(y_true, shift=i, axis=2), axis=1)
         # y_pred_sorted = tf.sort(tf.roll(y_pred, shift=i, axis=2), axis=1)
         loss = self.loss_fn(y_true_sorted, y_pred_sorted)
