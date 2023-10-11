@@ -76,7 +76,7 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
     def __init__(
         self,
         base: SetBertModel,
-        mask_ratio: float = 0.15
+        mask_ratio: float = 0.15,
         **kwargs
     ):
         super().__init__(**kwargs)
