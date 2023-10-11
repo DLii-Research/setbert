@@ -94,7 +94,7 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
         num_masked, y = self.masking(y)
         y = self.base(y)
         y = tf.keras.layers.Lambda(lambda x: x[0][:,1:x[1]+1,:])((y, num_masked))
-        y = tf.keras.layers.Dense(self.embed_dim)(y)
+        y = tf.keras.layers.Dense(self.base.embed_dim)(y)
         return tf.keras.Model(x, (embeddings, num_masked, y))
 
     def default_loss(self):
@@ -181,9 +181,7 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
     def get_config(self):
         return super().get_config() | {
             "base": self.base,
-            "mask_ratio": self.masking.mask_ratio.numpy(), # type: ignore
-            "compute_sequence_embeddings": self.compute_sequence_embeddings,
-            "stop_sequence_embedding_gradient": self.stop_sequence_embedding_gradient
+            "mask_ratio": self.masking.mask_ratio.numpy() # type: ignore
         }
 
 
