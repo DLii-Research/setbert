@@ -76,34 +76,25 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
     def __init__(
         self,
         base: SetBertModel,
-        mask_ratio: float = 0.15,
-        compute_sequence_embeddings: bool = True,
-        stop_sequence_embedding_gradient: bool = True,
+        mask_ratio: float = 0.15
         **kwargs
     ):
         super().__init__(**kwargs)
         self.base = base
         self.masking = layers.SetMask(self.base.embed_dim, self.base.max_set_len, mask_ratio)
-        self.compute_sequence_embeddings = compute_sequence_embeddings
-        self.stop_sequence_embedding_gradient = stop_sequence_embedding_gradient
         self.embed_layer: layers.ChunkedEmbeddingLayer|None = None
 
     def build_model(self):
-        if self.compute_sequence_embeddings:
-            y = x = tf.keras.layers.Input((
-                self.base.max_set_len,
-                self.base.dnabert_encoder.input_shape[-1]))
-            self.embed_layer = layers.ChunkedEmbeddingLayer(
-                self.base.dnabert_encoder,
-                stop_gradient=self.stop_sequence_embedding_gradient
-            )
-            y = embeddings = self.embed_layer(y)
-        else:
-            y = embeddings = x = tf.keras.layers.Input((self.base.max_set_len, self.base.embed_dim))
+        y = x = tf.keras.layers.Input((None,self.base.dnabert_encoder.input_shape[-1]))
+        self.embed_layer = layers.ChunkedEmbeddingLayer(
+            self.base.dnabert_encoder,
+            stop_gradient=True
+        )
+        y = embeddings = self.embed_layer(y)
         num_masked, y = self.masking(y)
         y = self.base(y)
-        # y = self.Dense(self.base.embed_dim)(y)
         y = tf.keras.layers.Lambda(lambda x: x[0][:,1:x[1]+1,:])((y, num_masked))
+        y = tf.keras.layers.Dense(self.embed_dim)(y)
         return tf.keras.Model(x, (embeddings, num_masked, y))
 
     def default_loss(self):
