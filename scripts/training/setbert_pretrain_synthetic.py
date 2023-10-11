@@ -44,7 +44,7 @@ class PersistentSetBertPretrainModel(dcs.module.Wandb.PersistentObject[SetBertPr
 def define_arguments(context: dcs.Context):
     parser = context.argument_parser
     group = parser.add_argument_group("Dataset Settings")
-    group.add_argument("--sythetic-dataset-path", type=Path, help="The path to the synthetic datasets directory.")
+    group.add_argument("--synthetic-dataset-path", type=Path, help="The path to the synthetic datasets directory.")
     group.add_argument("--datasets", type=lambda x: x.split(','), help="A comma-separated list of the datasets to use for training and validation.")
     group.add_argument("--distribution", type=str, default="natural", choices=["natural", "presence-absence"], help="The distribution of the data to use for training and validation.")
 
