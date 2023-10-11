@@ -23,13 +23,8 @@ class PersistentSetBertPretrainModel(dcs.module.Wandb.PersistentObject[SetBertPr
             max_set_len=config.max_subsample_size,
             stack=config.stack,
             num_heads=config.num_heads)
-        model = SetBertPretrainModel(
-            base,
-            mask_ratio=config.mask_ratio,
-            stop_sequence_embedding_gradient=config.static_dnabert)
-        if config.static_dnabert:
-            model.base.dnabert_encoder.trainable = False
-            model.chunk_size = config.chunk_size
+        model = SetBertPretrainModel(base, mask_ratio=config.mask_ratio)
+        model.chunk_size = config.chunk_size
         model.compile(optimizer=tf.keras.optimizers.Adam(config.lr))
         return model
 
@@ -49,7 +44,7 @@ class PersistentSetBertPretrainModel(dcs.module.Wandb.PersistentObject[SetBertPr
 def define_arguments(context: dcs.Context):
     parser = context.argument_parser
     group = parser.add_argument_group("Dataset Settings")
-    group.add_argument("--datasets-path", type=Path, help="The path to the datasets directory.")
+    group.add_argument("--sythetic-dataset-path", type=Path, help="The path to the synthetic datasets directory.")
     group.add_argument("--datasets", type=lambda x: x.split(','), help="A comma-separated list of the datasets to use for training and validation.")
     group.add_argument("--distribution", type=str, default="natural", choices=["natural", "presence-absence"], help="The distribution of the data to use for training and validation.")
 
@@ -60,7 +55,6 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--num-heads", type=int, default=8)
     group.add_argument("--mask-ratio", type=float, default=0.15)
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
-    group.add_argument("--static-dnabert", action="store_true", default=False, help="Disable backpropagation to DNABERT encoder.")
     group.add_argument("--chunk-size", type=int, default=None, help="The number of sequences to process at once. Ignored if --static-dnabert is not set.")
 
     wandb = context.get(dcs.module.Wandb)
@@ -71,12 +65,14 @@ def define_arguments(context: dcs.Context):
 
 
 def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int):
+    synthetic_fasta = config.synthetic_dataset_path / "Synthetic.fasta.db"
+    synthetic_fasta_index = config.synthetic_dataset_path / "Synthetic.fasta.index.db"
     samples = []
     for dataset in config.datasets:
         samples += sample.load_multiplexed_fasta(
-            config.datasets_path / dataset / f"{dataset}.fasta.db",
+            synthetic_fasta,
             config.datasets_path / dataset / f"{dataset}.fasta.mapping.db",
-            config.datasets_path / dataset / f"{dataset}.fasta.index.db",
+            synthetic_fasta_index,
             sample.SampleMode.Natural if config.distribution == "natural" else sample.SampleMode.PresenceAbsence)
     print(f"Found {len(samples)} samples.")
     common_args = dict(
@@ -87,13 +83,13 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
         samples,
         batch_size=config.batch_size,
         batches_per_epoch=config.steps_per_epoch,
-        **common_args)
+        **common_args) # type: ignore
     val_data = SequenceGenerator(
         samples,
         batch_size=config.val_batch_size,
         batches_per_epoch=config.val_steps_per_epoch,
         shuffle=False,
-        **common_args)
+        **common_args) # type: ignore
     return train_data, val_data
 
 
