@@ -8,6 +8,7 @@ import deepctx.scripting as dcs
 from deepctx.lazy import tensorflow as tf
 from pathlib import Path
 from deepdna.nn.data_generators import SequenceGenerator
+from deepdna.nn.losses import FastSortedLoss
 from deepdna.nn.models import load_model
 from deepdna.nn.models.dnabert import DnaBertEncoderModel, DnaBertPretrainModel
 from deepdna.nn.models.setbert import SetBertModel, SetBertPretrainModel
@@ -25,7 +26,9 @@ class PersistentSetBertPretrainModel(dcs.module.Wandb.PersistentObject[SetBertPr
             num_heads=config.num_heads)
         model = SetBertPretrainModel(base, mask_ratio=config.mask_ratio)
         model.chunk_size = config.chunk_size
-        model.compile(optimizer=tf.keras.optimizers.Adam(config.lr))
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(config.lr),
+            loss=FastSortedLoss())
         return model
 
     def load(self):
