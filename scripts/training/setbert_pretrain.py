@@ -97,25 +97,27 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
 def main(context: dcs.Context):
     config = context.config
 
-    # Get the model instance
-    model = PersistentSetBertPretrainModel()
+    with context.get(dcs.module.Tensorflow).strategy().scope():
 
-    # Training
-    if config.train:
-        print("Training model...")
-        train_data, val_data = data_generators(
-            config,
-            model.instance.sequence_length,
-            model.instance.kmer)
-        model.path("model").mkdir(exist_ok=True, parents=True)
-        context.get(dcs.module.Train).fit(
-            model.instance,
-            train_data,
-            validation_data=val_data,
-            callbacks=[
-                tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
-                context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger()
-            ])
+        # Get the model instance
+        model = PersistentSetBertPretrainModel()
+
+        # Training
+        if config.train:
+            print("Training model...")
+            train_data, val_data = data_generators(
+                config,
+                model.instance.sequence_length,
+                model.instance.kmer)
+            model.path("model").mkdir(exist_ok=True, parents=True)
+            context.get(dcs.module.Train).fit(
+                model.instance,
+                train_data,
+                validation_data=val_data,
+                callbacks=[
+                    tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
+                    context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger()
+                ])
 
     # Artifact logging
     if config.log_artifact is not None:
