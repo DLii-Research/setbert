@@ -4,6 +4,7 @@ synthetic_data_path=~/work/Datasets/Synthetic
 # Models -------------------------------------------------------------------------------------------
 
 # DNABERT
+export dnabert_pretrain_silva=sirdavidludwig/model-registry/dnabert-pretrain-silva-64d-150l:v0
 export dnabert_taxonomy_naive=sirdavidludwig/dnabert-taxonomy/dnabert-taxonomy-naive-64d-150l:v0
 export dnabert_taxonomy_bertax=sirdavidludwig/dnabert-taxonomy/dnabert-taxonomy-bertax-64d-150l:v0
 export dnabert_taxonomy_topdown=sirdavidludwig/dnabert-taxonomy/dnabert-taxonomy-topdown-64d-150l:v0
