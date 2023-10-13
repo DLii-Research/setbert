@@ -191,7 +191,7 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self,
         base: SetBertModel,
         compute_sequence_embeddings: bool = False,
-        stop_sequence_embedding_gradient: bool = True,
+        stop_sequence_embedding_gradient: bool = False,
         output_class: bool = True,
         output_sequences: bool = False,
         **kwargs
