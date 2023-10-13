@@ -13,6 +13,7 @@ export dnabert_taxonomy_topdown=sirdavidludwig/dnabert-taxonomy/dnabert-taxonomy
 export dnabert_taxonomy_topdown_deep=sirdavidludwig/dnabert-taxonomy/dnabert-taxonomy-topdown-deep-64d-150l:v0
 
 # SetBERT
+export setbert_pretrain_silva=sirdavidludwig/model-registry/setbert-pretrain-silva-64d-150l:v0
 export setbert_taxonomy_topdown=sirdavidludwig/model-registry/setbert-taxonomy-topdown-64d-150l:v0
 
 # SetBERT (leave-one-out controls)
