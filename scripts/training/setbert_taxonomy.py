@@ -6,7 +6,6 @@ import argparse
 from dnadb import fasta, sample, taxonomy
 import deepctx.scripting as dcs
 from deepctx.lazy import tensorflow as tf
-from itertools import repeat
 import numpy as np
 from pathlib import Path
 from deepdna.data.tokenizers import TopDownTaxonomyTokenizer
