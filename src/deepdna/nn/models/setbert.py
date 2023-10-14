@@ -259,6 +259,10 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
     def sequence_length(self):
         return self.dnabert_encoder.base.sequence_length
 
+    @property
+    def dnabert_encoder(self):
+        return self.base.dnabert_encoder
+
     def call(
         self,
         inputs,
