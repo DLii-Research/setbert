@@ -1,18 +1,18 @@
-from dnadb import dna, taxonomy
-from dnadb.sample import FastaSample, SampleInterface
+from dnadb import dna, sample, taxonomy
+import inspect
 import numpy as np
 import numpy.typing as npt
 import tensorflow as tf
-from typing import Any, cast, Generic, Iterable, Optional, TypeVar
+from typing import Any, Callable, Generic, Iterable, TypeVar
 
-from ..data.tokenizers import AbstractTaxonomyTokenizer
-from ..data.samplers import SequenceSampler, SampleSampler
-
-class BatchGenerator(tf.keras.utils.Sequence):
+IOType = TypeVar("IOType")
+class BatchGenerator(tf.keras.utils.Sequence, Generic[IOType]):
     def __init__(
         self,
         batch_size: int,
         batches_per_epoch: int,
+        pipeline: list[Callable[..., dict[str, Any]|Any]],
+        io: Callable[[dict[str, Any]], IOType],
         shuffle: bool = True,
         rng: np.random.Generator = np.random.default_rng()
     ):
@@ -20,27 +20,11 @@ class BatchGenerator(tf.keras.utils.Sequence):
         self.batch_size = batch_size
         self.batches_per_epoch = batches_per_epoch
         self.shuffle_after_epoch = shuffle
+        self.pipeline = [(step, inspect.signature(step).parameters.keys()) for step in pipeline]
+        self.io = io
         self.rng = rng
         self.shuffle()
 
-    def generate_batch(self, rng: np.random.Generator):
-        """
-        Generate a batch using the given RNG.
-        """
-        raise NotImplementedError()
-
-    def reduce_batch(self, batch):
-        """
-        Reduce the batch to the desired output
-        """
-        return batch
-
-    def rng_for_batch(self, batch_index):
-        """
-        Create a new random generator instance for a particular batch.
-        """
-        seed = self.__batch_seeds[batch_index]
-        return np.random.Generator(np.random.PCG64(seed))
 
     def shuffle(self):
         """
@@ -57,264 +41,164 @@ class BatchGenerator(tf.keras.utils.Sequence):
             self.shuffle()
 
     def get(self, batch_index):
-        rng = self.rng_for_batch(batch_index)
-        return self.generate_batch(rng)
+        """
+        Get a batch of data
+        """
+        seed = self.__batch_seeds[batch_index]
+        store: dict[str, Any] = dict(
+            batch_size=self.batch_size,
+            np_rng=np.random.Generator(np.random.PCG64(seed)),
+            tf_rng=tf.random.Generator.from_seed(seed.entropy[0]),
+        )
+        for step, arguments in self.pipeline:
+            store.update(step(**{k: store[k] for k in arguments}) or {})
+        return store
 
-    def __getitem__(self, batch_index):
-        return self.reduce_batch(self.get(batch_index))
+    def __getitem__(self, batch_index) -> IOType:
+        batch = self.get(batch_index)
+        return self.io(batch)
 
     def __len__(self):
         return self.batches_per_epoch
 
 
-def _encode_sequences(sequences: npt.NDArray[np.str_], augment_ambiguous_bases: bool, rng: np.random.Generator) -> npt.NDArray[np.uint8]:
-    result = []
-    for subsample in sequences:
-        result.append([])
-        for sequence in subsample:
-            result[-1].append(dna.encode_sequence(sequence))
-    result = np.array(result, dtype=np.uint8)
-    if augment_ambiguous_bases:
-        result = dna.replace_ambiguous_encoded_bases(result, rng)
-    return result
-
-class SequenceGenerator(BatchGenerator):
-    def __init__(
-        self,
-        samples: Iterable[SampleInterface],
-        sequence_length: int,
-        kmer: int = 1,
-        subsample_size: int|None = None,
-        augment_slide: bool = True,
-        augment_ambiguous_bases: bool = True,
-        use_kmer_inputs: bool = True,
-        use_kmer_labels: bool = True,
-        batch_size: int = 32,
-        batches_per_epoch: int = 100,
-        shuffle: bool = True,
-        balance: bool = False,
-        rng: np.random.Generator = np.random.default_rng()
-    ):
-        super().__init__(
-            batch_size=batch_size,
-            batches_per_epoch=batches_per_epoch,
-            shuffle=shuffle,
-            rng=rng
-        )
-        self.sample_sampler = SampleSampler(samples)
-        self.sequence_sampler = SequenceSampler(sequence_length, augment_slide)
-        self.kmer = kmer
-        self.subsample_size = subsample_size
-        self.augment_ambiguous_bases = augment_ambiguous_bases
-        self.use_kmer_inputs = use_kmer_inputs
-        self.use_kmer_labels = use_kmer_labels
-        self.balance = balance
-
-    @property
-    def sequence_length(self) -> int:
-        return self.sequence_sampler.sequence_length
-
-    def generate_batch(
-        self,
-        rng: np.random.Generator
-    ) -> tuple[
-        npt.NDArray[np.str_], # sample IDs
-        npt.NDArray[np.str_], # sequence IDs
-        npt.NDArray[np.int32], # sequences
-        npt.NDArray[np.int32] # sequences
-    ]:
-        subsample_size = self.subsample_size or 1
-        sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
-        sample_ids = np.empty(self.batch_size, dtype=np.int32)
-        sequence_ids = [None] * self.batch_size
-        samples = self.sample_sampler.sample_with_ids(self.batch_size, self.balance, rng)
-        for i, (sample_id, sample) in enumerate(samples):
-            sequence_info = tuple(self.sequence_sampler.sample_with_ids(sample, subsample_size, rng))
-            sequence_ids[i], sequences[i] = zip(*sequence_info)
-            sample_ids[i] = sample_id
-        sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
-        if self.subsample_size is None:
-            sequences = np.squeeze(sequences, axis=1)
-        x = y = sequences.astype(np.int32)
-        if self.kmer > 1:
-            kmers = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases).astype(np.int32) # type: ignore
-            x = kmers if self.use_kmer_inputs else x
-            y = kmers if self.use_kmer_labels else y
-        return sample_ids, sequence_ids, x, y
-
-    def reduce_batch(self, batch):
-        # remove sample IDs and sequence IDs
-        return batch[2:]
-
-class SampleGenerator(BatchGenerator):
-    def __init__(
-        self,
-        samples: Iterable[SampleInterface],
-        sequence_length: int,
-        kmer: int = 1,
-        subsample_size: int|None = None,
-        augment_slide: bool = True,
-        augment_ambiguous_bases: bool = True,
-        batch_size: int = 32,
-        batches_per_epoch: int = 100,
-        class_weights: Optional[npt.ArrayLike] = None,
-        shuffle: bool = True,
-        balance: bool = False,
-        rng: np.random.Generator = np.random.default_rng()
-    ):
-        super().__init__(
-            batch_size=batch_size,
-            batches_per_epoch=batches_per_epoch,
-            shuffle=shuffle,
-            rng=rng
-        )
-        self.sample_sampler = SampleSampler(samples, p=class_weights)
-        self.sequence_sampler = SequenceSampler(sequence_length, augment_slide)
-        self.kmer = kmer
-        self.subsample_size = subsample_size
-        self.augment_ambiguous_bases = augment_ambiguous_bases
-        self.balance = balance
-
-    @property
-    def sequence_length(self) -> int:
-        return self.sequence_sampler.sequence_length
-
-    def generate_batch(
-        self,
-        rng: np.random.Generator
-    ) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32]]:
-        subsample_size = self.subsample_size or 1
-        sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
-        sample_ids = np.empty(self.batch_size, dtype=np.int32)
-        samples = self.sample_sampler.sample_with_ids(self.batch_size, self.balance, rng)
-        for i, (sample_id, sample) in enumerate(samples):
-            sequences[i] = tuple(self.sequence_sampler.sample(sample, subsample_size, rng))
-            sample_ids[i] = sample_id
-        sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
-        if self.subsample_size is None:
-            sequences = np.squeeze(sequences, axis=1) # type: ignore
-        if self.kmer > 1:
-            sequences = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases)
-        return sequences.astype(np.int32), sample_ids
-
-class SequenceTaxonomyGenerator(BatchGenerator):
-    def __init__(
-        self,
-        fasta_taxonomy_pairs: Iterable[tuple[FastaSample, taxonomy.TaxonomyDb]],
-        sequence_length: int,
-        taxonomy_tokenizer: AbstractTaxonomyTokenizer,
-        kmer: int = 1,
-        subsample_size: int|None = None,
-        batch_size: int = 32,
-        batches_per_epoch: int = 100,
-        augment_slide: bool = True,
-        augment_ambiguous_bases: bool = True,
-        balance: bool = False,
-        shuffle: bool = True,
-        rng: np.random.Generator = np.random.default_rng()
-    ):
-        super().__init__(
-            batch_size=batch_size,
-            batches_per_epoch=batches_per_epoch,
-            shuffle=shuffle,
-            rng=rng
-        )
-        fasta_samples, taxonomy_dbs = zip(*fasta_taxonomy_pairs)
-        self.sample_sampler = SampleSampler(cast(tuple[FastaSample, ...], fasta_samples))
-        self.sequence_sampler = SequenceSampler(sequence_length, augment_slide)
-        self.taxonomy_dbs: tuple[taxonomy.TaxonomyDb, ...] = cast(Any, taxonomy_dbs)
-        self.kmer = kmer
-        self.taxonomy_tokenizer = taxonomy_tokenizer
-        self.subsample_size = subsample_size
-        self.augment_ambiguous_bases = augment_ambiguous_bases
-        self.balance = balance
-
-    @property
-    def sequence_length(self) -> int:
-        return self.sequence_sampler.sequence_length
-
-    def generate_batch(
-        self,
-        rng: np.random.Generator
-    ) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32]]:
-        subsample_size = self.subsample_size or 1
-        sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
-        sample_ids = np.empty(self.batch_size, dtype=np.int32)
-        sequence_ids = [None] * self.batch_size
-        label_ids = np.empty((self.batch_size, subsample_size, self.taxonomy_tokenizer.depth), dtype=np.int32)
-        samples = self.sample_sampler.sample_with_ids(self.batch_size, self.balance, rng)
-        for i, (sample_id, sample) in enumerate(samples):
-            tax_db = self.taxonomy_dbs[sample_id]
-            sequence_info = tuple(self.sequence_sampler.sample_with_ids(sample, subsample_size, rng))
-            sequence_ids[i], sequences[i] = zip(*sequence_info)
-            sample_ids[i] = sample_id
-            label_ids[i] = [self.taxonomy_tokenizer.tokenize_label(tax_db.fasta_id_to_label(fasta_id)) for fasta_id in sequence_ids[i]]
-        sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
-        if self.subsample_size is None:
-            sequences = np.squeeze(sequences, axis=1)
-            label_ids = np.squeeze(label_ids, axis=1)
-        sequences = sequences.astype(np.int32)
-        if self.kmer > 1:
-            sequences = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases).astype(np.int32) # type: ignore
-        return sample_ids, sequence_ids, sequences, tuple(label_ids.T)[-1]
-
-    def reduce_batch(self, batch):
-        # remove sample IDs and sequence IDs
-        return batch[2:]
+def random_samples(
+    samples: Iterable[sample.SampleInterface],
+    weighted: bool = False,
+):
+    _samples = list(samples)
+    samples = np.empty(len(_samples), dtype=object)
+    samples[:] = _samples
+    del _samples
+    p = None
+    if weighted:
+        abundances = np.array([len(s) for s in samples])
+        p = abundances / abundances.sum()
+    def factory(batch_size: int, np_rng: np.random.Generator):
+        return dict(samples=np_rng.choice(samples, batch_size, replace=True, p=p)) # type: ignore
+    return factory
 
 
-_T = TypeVar("_T")
-class SampleValuePairGenerator(SampleGenerator, Generic[_T]):
-    def __init__(
-        self,
-        samples: Iterable[SampleInterface],
-        sample_values: dict[str, _T],
-        sequence_length: int,
-        kmer: int = 1,
-        subsample_size: int|None = None,
-        augment_slide: bool = True,
-        augment_ambiguous_bases: bool = True,
-        batch_size: int = 32,
-        batches_per_epoch: int = 100,
-        class_weights: Optional[npt.ArrayLike] = None,
-        shuffle: bool = True,
-        balance: bool = False,
-        rng: np.random.Generator = np.random.default_rng()
-    ):
-        super().__init__(
-            samples=samples,
-            sequence_length=sequence_length,
-            kmer=kmer,
-            subsample_size=subsample_size,
-            augment_slide=augment_slide,
-            augment_ambiguous_bases=augment_ambiguous_bases,
-            batch_size=batch_size,
-            batches_per_epoch=batches_per_epoch,
-            class_weights=class_weights,
-            shuffle=shuffle,
-            balance=balance,
-            rng=rng
-        )
-        self.sample_values = sample_values
+def _random_sequences_fixed(subsample_size: int|None):
+    n = subsample_size or 1
+    entry_mapper = lambda entry: (entry.identifier, entry.sequence)
+    def factory(samples: list[sample.FastaSample]):
+        sequences = np.empty(len(samples), dtype=object)
+        fasta_ids = np.empty(len(samples), dtype=object)
+        for i, s in enumerate(samples):
+            fasta_ids[i], sequences[i] = map(np.array, zip(*map(entry_mapper, s.sample(n))))
+            if subsample_size is None:
+                fasta_ids[i] = fasta_ids[i][0]
+                sequences[i] = sequences[i][0]
+        return dict(sequences=sequences, fasta_ids=fasta_ids, subsample_size=subsample_size)
+    return factory
 
-    def generate_batch(self, rng: np.random.Generator):
-        subsample_size = self.subsample_size or 1
-        sequences = np.empty((self.batch_size, subsample_size), dtype=f"<U{self.sequence_length}")
-        sample_values = []
-        samples = self.sample_sampler.sample(self.batch_size, self.balance, rng)
-        for i, sample in enumerate(samples):
-            sequences[i] = tuple(self.sequence_sampler.sample(sample, subsample_size, rng))
-            sample_values.append(self.sample_values[sample.name])
-        sequences = _encode_sequences(sequences, self.augment_ambiguous_bases, self.rng)
-        if self.subsample_size is None:
-            sequences = np.squeeze(sequences, axis=1) # type: ignore
-        if self.kmer > 1:
-            sequences = dna.encode_kmers(sequences, self.kmer, not self.augment_ambiguous_bases)
-        return (sequences.astype(np.int32), np.array(sample_values, dtype=np.float32)), None
+def _random_sequences_ragged(min_subsample_size: int, max_subsample_size: int):
+    entry_mapper = lambda entry: (entry.identifier, entry.sequence)
+    def factory(samples: list[sample.FastaSample], np_rng: np.random.Generator):
+        sequences = np.empty(len(samples), dtype=object)
+        fasta_ids = np.empty(len(samples), dtype=object)
+        for i, (s, subsample_size) in enumerate(zip(
+            samples,
+            np_rng.integers(min_subsample_size, max_subsample_size+1, len(samples))
+        )):
+            fasta_ids[i], sequences[i] = zip(*map(
+                entry_mapper,
+                s.sample(subsample_size)))
+        return dict(sequences=sequences, fasta_ids=fasta_ids, subsample_size=(min_subsample_size, max_subsample_size))
+    return factory
+
+def random_sequences(subsample_size: tuple[int, int]|int|None = None):
+    if isinstance(subsample_size, tuple):
+        min_subsample_size, max_subsample_size = subsample_size
+        return _random_sequences_ragged(min_subsample_size, max_subsample_size)
+    else:
+        return _random_sequences_fixed(subsample_size)
 
 
-_T = TypeVar("_T")
-class SampleValueTargetGenerator(SampleValuePairGenerator[_T]):
-    def generate_batch(self, rng: np.random.Generator):
-        (x, y), _ = super().generate_batch(rng)
-        return x, y
+def _trim_sequences_fixed(length: int):
+    def factory(sequences: npt.NDArray[np.object_], np_rng: np.random.Generator):
+        if not isinstance(sequences[0], np.ndarray):
+            sequences = [sequences]
+        for subsample in sequences:
+            for i, sequence in enumerate(subsample):
+                offset = np_rng.integers(0, len(sequence) - length)
+                subsample[i] = sequence[offset:offset + length]
+        return None
+    return factory
+
+def _trim_sequences_ragged(min_length: int, max_length: int):
+    def factory(sequences: npt.NDArray[np.object_], np_rng: np.random.Generator):
+        if not isinstance(sequences[0], np.ndarray):
+            sequences = [sequences]
+        for subsample in sequences:
+            for i, sequence in enumerate(subsample):
+                length = np_rng.integers(min_length, max_length+1)
+                offset = np_rng.integers(0, len(sequence) - length)
+                subsample[i] = sequence[offset:offset + length]
+        return None
+    return factory
+
+def trim_sequences(length: int|tuple[int, int]):
+    if isinstance(length, tuple):
+        min_length, max_length = length
+        return _trim_sequences_ragged(min_length, max_length)
+    else:
+        return _trim_sequences_fixed(length)
+
+
+def encode_sequences():
+    def factory(sequences: npt.NDArray[np.object_]):
+        if not isinstance(sequences[0], np.ndarray):
+            return dict(sequences=list(map(dna.encode_sequence, sequences)))
+        return dict(
+            sequences=[
+                list(map(dna.encode_sequence, subsample))
+                for subsample in sequences])
+    return factory
+
+
+def augment_ambiguous_bases():
+    def factory(sequences: npt.NDArray[np.object_]):
+        if isinstance(sequences[0], np.ndarray):
+            return dict(sequences=[dna.augment_ambiguous_bases(s) for s in sequences])
+        return dict(
+            kmer_sequences=[
+                [dna.augment_ambiguous_bases(s) for s in subsample]
+                for subsample in sequences])
+    return factory
+
+
+def encode_kmers(kmer: int = 1, ambiguous_bases: bool = False):
+    if kmer == 1:
+        return lambda: None
+    def factory(sequences: npt.NDArray[np.object_]):
+        if isinstance(sequences[0], np.ndarray):
+            return dict(kmer_sequences=[dna.encode_kmers(s, kmer) for s in sequences])
+        return dict(
+            kmer_sequences=[
+                [dna.encode_kmers(s, kmer) for s in subsample]
+                    for subsample in sequences])
+    return factory
+
+
+def taxonomy_labels(tax_db: taxonomy.TaxonomyDb):
+    def factory(fasta_ids: npt.NDArray[np.object_]):
+        if not isinstance(fasta_ids[0], np.ndarray):
+            return dict(taxonomy_labels=[tax_db.fasta_id_to_label(fasta_id) for fasta_id in fasta_ids])
+        return dict(
+            taxonomy_labels=[
+                [tax_db.fasta_id_to_label(fasta_id) for fasta_id in subsample]
+                for subsample in fasta_ids])
+    return factory
+
+
+def map_taxonomy_labels(fn):
+    def factory(taxonomy_labels: npt.NDArray[np.object_]):
+        if type(taxonomy_labels[0]) in (str, bytes):
+            return dict(taxonomy_labels=[fn(label) for label in taxonomy_labels])
+        return dict(
+            taxonomy_labels=[
+                [fn(label) for label in subsample]
+                for subsample in taxonomy_labels])
+    return factory
