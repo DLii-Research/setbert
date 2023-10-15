@@ -1,5 +1,46 @@
+import numpy as np
+import numpy.typing as npt
 import tensorflow as tf
-from typing import Any, cast, TypeVar, Type
+from typing import Any, Callable, cast, TypeVar
+
+class PostInit(type):
+    """
+    A metaclass that allows the implementation of `__post_init__(self)` to allow post-processing
+    after __init__ has been invoked.
+    """
+    def __init__(cls, name, bases, dct):
+        original_init = cls.__init__
+        def init(self, *args, **kwargs):
+            if type(self) is cls:
+                original_init(self, *args, **kwargs)
+                if hasattr(self, "__post_init__"):
+                    self.__post_init__()
+            else:
+                original_init(self, *args, **kwargs)
+        cls.__init__ = init # type: ignore
+        super().__init__(name, bases, dct)
+
+
+def ndarray_from_iterable(elements) -> npt.NDArray[np.object_]:
+    arr = np.empty(len(elements), dtype=np.object_)
+    arr[:] = elements
+    return arr
+
+
+def recursive_map(
+    fn: Callable,
+    objs,
+    container_type = list
+) -> Any:
+    """
+    Apply a function recursively to a list of arguments using a for loop and a queue.
+    Store the result in a new list of the same shape.
+    """
+    if isinstance(objs, (list, tuple, np.ndarray)):
+        return container_type([recursive_map(fn, obj) for obj in objs])
+    return fn(objs)
+
+# Tensorflow Utilities -----------------------------------------------------------------------------
 
 TensorflowObject = TypeVar("TensorflowObject")
 
@@ -19,24 +60,6 @@ def optimizer(name: str, **kwargs) -> tf.keras.optimizers.Optimizer:
     Get an optimizer instance by name with the given keyword arguments as the configuration.
     """
     return tf.keras.optimizers.get({"class_name": name, "config": {**kwargs}})
-
-
-class PostInit(type):
-    """
-    A metaclass that allows the implementation of `__post_init__(self)` to allow post-processing
-    after __init__ has been invoked.
-    """
-    def __init__(cls, name, bases, dct):
-        original_init = cls.__init__
-        def init(self, *args, **kwargs):
-            if type(self) is cls:
-                original_init(self, *args, **kwargs)
-                if hasattr(self, "__post_init__"):
-                    self.__post_init__()
-            else:
-                original_init(self, *args, **kwargs)
-        cls.__init__ = init
-        super().__init__(name, bases, dct)
 
 # Model/Layer Utilities ----------------------------------------------------------------------------
 
