@@ -1,7 +1,4 @@
 #!/bin/env python3
-"""
-Pre-train a SetBERT model using a pre-trained DNABERT model to bootstrap learning.
-"""
 import argparse
 from dnadb import fasta, sample, taxonomy
 import deepctx.scripting as dcs
@@ -13,6 +10,7 @@ from deepdna.nn import data_generators as dg
 from deepdna.nn.models import load_model
 from deepdna.nn.models.setbert import SetBertEncoderModel, SetBertPretrainModel
 from deepdna.nn.models.taxonomy import TopDownTaxonomyClassificationModel
+from deepdna.nn.utils import recursive_map
 
 class PersistentSetBertTaxonomyModel(dcs.module.Wandb.PersistentObject[TopDownTaxonomyClassificationModel[SetBertEncoderModel]]):
     def create(self, config: argparse.Namespace):
@@ -28,6 +26,7 @@ class PersistentSetBertTaxonomyModel(dcs.module.Wandb.PersistentObject[TopDownTa
             SetBertEncoderModel(
                 setbert_base,
                 compute_sequence_embeddings=True,
+                stop_sequence_embedding_gradient=False,
                 output_class=False,
                 output_sequences=True),
             tokenizer)
@@ -51,7 +50,7 @@ def define_arguments(context: dcs.Context):
     parser = context.argument_parser
     group = parser.add_argument_group("Dataset Settings")
     group.add_argument("--synthetic-dataset-path", type=Path, help="The path to the synthetic datasets directory.")
-    group.add_argument("--datasets", type=lambda x: x.split(','), help="A comma-separated list of the datasets to use for training and validation.")
+    group.add_argument("--datasets", type=lambda x: x.split(','), required=True, help="A comma-separated list of the datasets to use for training and validation.")
     group.add_argument("--synthetic-classifier", type=str, default="Topdown", choices=["Naive", "Bertax", "Topdown"], help="The synthetic classifier used for generating the synthetic datasets.")
     group.add_argument("--distribution", type=str, default="natural", choices=["natural", "presence-absence"], help="The distribution of the data to use for training and validation.")
     group.add_argument("--subsample-size", type=int, default=1000, help="The number of sequences per subsample")
@@ -84,26 +83,33 @@ def data_generators(
             sample.SampleMode.Natural if config.distribution == "natural" else sample.SampleMode.PresenceAbsence)
     print(f"Found {len(samples)} samples.")
     train_data = dg.BatchGenerator(config.batch_size, config.steps_per_epoch, [
-        dg.random_samples(samples),
-        dg.random_sequences(subsample_size=config.subsample_size),
-        dg.trim_sequences(sequence_length),
+        dg.random_fasta_samples(samples),
+        dg.random_sequence_entries(subsample_size=config.subsample_size),
+        dg.sequences(length=sequence_length),
+        dg.augment_ambiguous_bases,
         dg.encode_sequences(),
         dg.encode_kmers(kmer),
         dg.taxonomy_labels(tax_db),
-        dg.map_taxonomy_labels(lambda sequence: tokenizer.tokenize_label(sequence)[-1]),
-    ], lambda batch: (np.array(batch["kmer_sequences"]), np.array(batch["taxonomy_labels"])))
-    val_data = dg.BatchGenerator(config.val_batch_size, config.val_steps_per_epoch,
-        [
-            dg.random_samples(samples),
-            dg.random_sequences(subsample_size=config.subsample_size),
-            dg.trim_sequences(sequence_length),
-            dg.encode_sequences(),
-            dg.encode_kmers(kmer),
-            dg.taxonomy_labels(tax_db),
-            dg.map_taxonomy_labels(lambda sequence: tokenizer.tokenize_label(sequence)[-1]),
-        ],
-        lambda batch: (np.array(batch["kmer_sequences"]), np.array(batch["taxonomy_labels"])),
-        shuffle=False)
+        lambda taxonomy_labels: dict(
+            taxonomy_labels=np.array(recursive_map(
+                lambda sequence: tokenizer.tokenize_label(sequence)[-1],
+                taxonomy_labels))),
+        lambda encoded_kmer_sequences, taxonomy_labels: (encoded_kmer_sequences, taxonomy_labels)
+    ])
+    val_data = dg.BatchGenerator(config.val_batch_size, config.val_steps_per_epoch, [
+        dg.random_fasta_samples(samples),
+        dg.random_sequence_entries(subsample_size=config.subsample_size),
+        dg.sequences(length=sequence_length),
+        dg.augment_ambiguous_bases,
+        dg.encode_sequences(),
+        dg.encode_kmers(kmer),
+        dg.taxonomy_labels(tax_db),
+        lambda taxonomy_labels: dict(
+            taxonomy_labels=np.array(recursive_map(
+                lambda sequence: tokenizer.tokenize_label(sequence)[-1],
+                taxonomy_labels))),
+        lambda encoded_kmer_sequences, taxonomy_labels: (encoded_kmer_sequences, taxonomy_labels)
+    ], shuffle=False)
     return train_data, val_data
 
 def main(context: dcs.Context):
