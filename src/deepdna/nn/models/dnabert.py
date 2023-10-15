@@ -132,35 +132,37 @@ class DnaBertEncoderModel(ModelWrapper, tf.keras.Model):
     """
     The DNABERT encoder/embedding model architecture
     """
-    def __init__(self, base: DnaBertModel, chunk_size: Optional[int] = None, **kwargs):
+    def __init__(
+        self,
+        base: DnaBertModel,
+        output_class: bool = True,
+        output_kmers: bool = False,
+        **kwargs
+    ):
         super().__init__(**kwargs)
         self.base = base
-        self.chunk_size = chunk_size
+        self.output_class = output_class
+        self.output_kmers = output_kmers
 
     def build_model(self):
         y = x = tf.keras.layers.Input(self.base.input_shape[1:], dtype=tf.int32)
         y = tf.keras.layers.Lambda(lambda x: x + 1)(y)
         y = self.base(y)
-        token, _ = layers.SplitClassToken()(y)
-        return tf.keras.Model(x, token)
-
-    def encode(self, batch: tf.Tensor, chunk_size: int|None = None):
-        """
-        Deprecated
-        """
-        chunk_size = chunk_size if chunk_size is not None else self.chunk_size
-        original_shape = tf.shape(batch)
-        batch = tf.reshape(batch, (-1, original_shape[-1]))
-        if chunk_size is None:
-            result = self(batch)
-        else:
-            result = subbatch_predict(self, batch, chunk_size)
-        return tf.reshape(result, tf.concat((original_shape[:-1], (-1,)), axis=0))
+        class_token, kmer_tokens = layers.SplitClassToken()(y)
+        outputs = []
+        if self.output_class:
+            outputs.append(class_token)
+        if self.output_kmers:
+            outputs.append(kmer_tokens)
+        if len(outputs) == 1:
+            outputs = outputs[0]
+        return tf.keras.Model(x, outputs)
 
     def get_config(self):
         return super().get_config() | {
             "base": self.base,
-            "chunk_size": self.chunk_size
+            "output_class": self.output_class,
+            "output_kmers": self.output_kmers
         }
 
     @property
