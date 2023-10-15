@@ -118,6 +118,14 @@ class DnaBertPretrainModel(ModelWrapper, CustomModel):
             "mask_ratio": self.masking.mask_ratio.numpy() # type: ignore
         }
 
+    @property
+    def sequence_length(self):
+        return self.base.sequence_length
+
+    @property
+    def kmer(self):
+        return self.base.kmer
+
 
 @CustomObject
 class DnaBertEncoderModel(ModelWrapper, tf.keras.Model):
@@ -154,3 +162,11 @@ class DnaBertEncoderModel(ModelWrapper, tf.keras.Model):
             "base": self.base,
             "chunk_size": self.chunk_size
         }
+
+    @property
+    def sequence_length(self):
+        return self.base.sequence_length
+
+    @property
+    def kmer(self):
+        return self.base.kmer
