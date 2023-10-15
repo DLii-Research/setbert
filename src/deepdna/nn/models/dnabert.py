@@ -1,10 +1,9 @@
 import tensorflow as tf
-from typing import cast, Optional
+from typing import cast
 
 from .custom_model import ModelWrapper, CustomModel
 from .. import layers
 from ..registry import CustomObject
-from ..utils import subbatch_predict
 
 @CustomObject
 class DnaBertModel(ModelWrapper, CustomModel):
