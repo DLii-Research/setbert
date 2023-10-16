@@ -4,6 +4,7 @@ import numpy as np
 import numpy.typing as npt
 import re
 import tensorflow as tf
+import time
 from typing import Any, Callable, Generic, Iterable, Optional, TypeVar
 
 from .utils import ndarray_from_iterable, recursive_map
@@ -26,6 +27,19 @@ class BatchGenerator(tf.keras.utils.Sequence, Generic[IOType]):
         self.rng = rng if rng is not None else np.random.default_rng()
         self.shuffle()
 
+        self._num_batches_generated: int = 0
+        self._batch_generation_time: float = 0.0
+
+
+    @property
+    def average_batch_generation_time(self):
+        if self._num_batches_generated == 0:
+            return float("nan")
+        return self._batch_generation_time / self._num_batches_generated
+
+    def reset_batch_generation_time(self):
+        self._num_batches_generated = 0
+        self._batch_generation_time = 0.0
 
     def shuffle(self):
         """
@@ -40,11 +54,13 @@ class BatchGenerator(tf.keras.utils.Sequence, Generic[IOType]):
         """
         if self.shuffle_after_epoch:
             self.shuffle()
+        self.reset_batch_generation_time()
 
     def __getitem__(self, batch_index) -> IOType:
         """
         Get a batch of data
         """
+        t = time.time()
         seed = self.__batch_seeds[batch_index]
         store: dict[str, Any] = {}
         output: Any = dict(
@@ -54,6 +70,8 @@ class BatchGenerator(tf.keras.utils.Sequence, Generic[IOType]):
         for step, arguments in self.pipeline:
             store.update(output or {})
             output = step(**{k: store[k] for k in arguments})
+        self._batch_generation_time += time.time() - t
+        self._num_batches_generated += 1
         return output
 
     def __len__(self):
@@ -103,7 +121,7 @@ def sequences(
     if length is None:
         return lambda sequence_entries: dict(sequences=recursive_map(lambda s: s.sequence, sequence_entries))
     def trim(sequence: str, length: int, np_rng: np.random.Generator):
-        offset = np_rng.integers(0, len(sequence) - length)
+        offset = np_rng.integers(0, len(sequence) - length + 1)
         return sequence[offset:offset + length]
     if isinstance(length, tuple) and length[0] == length[1]:
         length = length[0]
