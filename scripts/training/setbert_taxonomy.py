@@ -1,4 +1,3 @@
-#!/bin/env python3
 import argparse
 from dnadb import fasta, sample, taxonomy
 import deepctx.scripting as dcs
@@ -82,7 +81,7 @@ def data_generators(
             synthetic_fasta_index_db,
             sample.SampleMode.Natural if config.distribution == "natural" else sample.SampleMode.PresenceAbsence)
     print(f"Found {len(samples)} samples.")
-    train_data = dg.BatchGenerator(config.batch_size, config.steps_per_epoch, [
+    generator_pipeline = [
         dg.random_fasta_samples(samples),
         dg.random_sequence_entries(subsample_size=config.subsample_size),
         dg.sequences(length=sequence_length),
@@ -95,21 +94,16 @@ def data_generators(
                 lambda sequence: tokenizer.tokenize_label(sequence)[-1],
                 taxonomy_labels))),
         lambda encoded_kmer_sequences, taxonomy_labels: (encoded_kmer_sequences, taxonomy_labels)
-    ])
-    val_data = dg.BatchGenerator(config.val_batch_size, config.val_steps_per_epoch, [
-        dg.random_fasta_samples(samples),
-        dg.random_sequence_entries(subsample_size=config.subsample_size),
-        dg.sequences(length=sequence_length),
-        dg.augment_ambiguous_bases,
-        dg.encode_sequences(),
-        dg.encode_kmers(kmer),
-        dg.taxonomy_labels(tax_db),
-        lambda taxonomy_labels: dict(
-            taxonomy_labels=np.array(recursive_map(
-                lambda sequence: tokenizer.tokenize_label(sequence)[-1],
-                taxonomy_labels))),
-        lambda encoded_kmer_sequences, taxonomy_labels: (encoded_kmer_sequences, taxonomy_labels)
-    ], shuffle=False)
+    ]
+    train_data = dg.BatchGenerator(
+        config.batch_size,
+        config.steps_per_epoch,
+        generator_pipeline)
+    val_data = dg.BatchGenerator(
+        config.val_batch_size,
+        config.val_steps_per_epoch,
+        generator_pipeline,
+        shuffle=False)
     return train_data, val_data
 
 def main(context: dcs.Context):
