@@ -7,9 +7,14 @@ from pathlib import Path
 from tqdm import tqdm
 
 
-def define_arguments(parser: argparse.ArgumentParser):
+def define_io_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--input-path", type=Path, required=True)
     parser.add_argument("--output-path", type=Path, required=True)
+
+
+def define_dataset_arguments(parser: argparse.ArgumentParser, default_name: str):
+    parser.add_argument("--name", type=str, default=default_name)
+    parser.add_argument("--min-length", type=int, default=150)
 
 
 def find_fastqs(path: Path):

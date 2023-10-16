@@ -6,7 +6,6 @@ import deepctx.scripting as dcs
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm, trange
-from typing import Iterable
 
 def define_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--synthetic-data-path", type=Path, required=True)
