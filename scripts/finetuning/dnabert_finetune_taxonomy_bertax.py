@@ -4,33 +4,36 @@ import deepctx.scripting as dcs
 from deepctx.lazy import tensorflow as tf
 import numpy as np
 from pathlib import Path
+from deepdna.data.tokenizers import NaiveTaxonomyTokenizer
 from deepdna.nn import data_generators as dg
 from deepdna.nn.models import load_model
 from deepdna.nn.models.dnabert import DnaBertEncoderModel, DnaBertPretrainModel
-from deepdna.nn.models.taxonomy import NaiveTaxonomyClassificationModel
+from deepdna.nn.models.taxonomy import BertaxTaxonomyClassificationModel
 from deepdna.nn.utils import recursive_map
 
-class PersistentDnaBertNaiveTaxonomyModel(dcs.module.Wandb.PersistentObject[NaiveTaxonomyClassificationModel[DnaBertEncoderModel]]):
+class PersistentDnaBertBertaxTaxonomyModel(dcs.module.Wandb.PersistentObject[BertaxTaxonomyClassificationModel[DnaBertEncoderModel]]):
     def create(self, config: argparse.Namespace):
         # Create tokenizer
         with taxonomy.TaxonomyDb(config.taxonomy_tsv_db) as tax_db:
-            taxonomy_id_map = taxonomy.TaxonomyIdMap.from_db(tax_db)
+            tokenizer = NaiveTaxonomyTokenizer(config.rank_depth)
+            tokenizer.add_labels(tax_db)
+            tokenizer.build()
         # Create the model
         wandb = self.context.get(dcs.module.Wandb)
         dnabert_pretrain_path = wandb.artifact_argument_path("dnabert_pretrain")
         dnabert_base = load_model(dnabert_pretrain_path, DnaBertPretrainModel).base
-        model = NaiveTaxonomyClassificationModel(
+        model = BertaxTaxonomyClassificationModel(
             DnaBertEncoderModel(
                 dnabert_base,
                 output_class=True,
                 output_kmers=False),
-            taxonomy_id_map)
+            tokenizer)
         model.summary()
         model.compile(optimizer=tf.keras.optimizers.Adam(config.lr))
         return model
 
     def load(self):
-        return load_model(self.path("model"), NaiveTaxonomyClassificationModel[DnaBertEncoderModel])
+        return load_model(self.path("model"), BertaxTaxonomyClassificationModel[DnaBertEncoderModel])
 
     def save(self):
         self.instance.save(self.path("model"))
@@ -47,6 +50,7 @@ def define_arguments(context: dcs.Context):
     group = parser.add_argument_group("Dataset Settings")
     group.add_argument("--sequences-fasta-db", type=Path, required=True, help="The path to the sequences FASTA DB.")
     group.add_argument("--taxonomy-tsv-db", type=Path, required=True, help="The path to the taxonomy TSV DB.")
+    group.add_argument("--rank-depth", type=int, default=6, help="The number of taxonomy ranks to classify to.")
 
     group = parser.add_argument_group("Model Settings")
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
@@ -62,7 +66,7 @@ def data_generators(
     config: argparse.Namespace,
     sequence_length: int,
     kmer: int,
-    taxonomy_id_map: taxonomy.TaxonomyIdMap
+    taxonomy_tokenizer: NaiveTaxonomyTokenizer
 ):
     fasta_db = sample.load_fasta(config.sequences_fasta_db)
     tax_db = taxonomy.TaxonomyDb(config.taxonomy_tsv_db)
@@ -77,8 +81,9 @@ def data_generators(
         dg.taxonomy_labels(tax_db),
         lambda taxonomy_labels: dict(
             taxonomy_labels=np.array(recursive_map(
-                taxonomy_id_map.label_to_id,
+                lambda sequence: taxonomy_tokenizer.tokenize_label(sequence),
                 taxonomy_labels))),
+        lambda taxonomy_labels: dict(taxonomy_labels=tuple(taxonomy_labels.T)),
         lambda encoded_kmer_sequences, taxonomy_labels: (encoded_kmer_sequences, taxonomy_labels)
     ]
     train_data = dg.BatchGenerator(
@@ -98,7 +103,7 @@ def main(context: dcs.Context):
     # with context.get(dcs.module.Tensorflow).strategy().scope():
 
     # Get the model instance
-    model = PersistentDnaBertNaiveTaxonomyModel()
+    model = PersistentDnaBertBertaxTaxonomyModel()
 
     # Training
     if config.train:
@@ -107,8 +112,7 @@ def main(context: dcs.Context):
             config,
             model.instance.base.sequence_length,
             model.instance.base.kmer,
-            model.instance.taxonomy_id_map)
-        print(train_data[0])
+            model.instance.taxonomy_tokenizer)
         model.path("model").mkdir(exist_ok=True, parents=True)
         run = context.get(dcs.module.Wandb).run
         context.get(dcs.module.Train).fit(
