@@ -1,14 +1,10 @@
-#!/bin/env python3
-"""
-Pre-train a SetBERT model using a pre-trained DNABERT model to bootstrap learning.
-"""
 import argparse
 from dnadb import sample
 import deepctx.scripting as dcs
 from deepctx.lazy import tensorflow as tf
 from pathlib import Path
 from deepdna.nn import data_generators as dg
-from deepdna.nn.losses import FastSortedLoss
+from deepdna.nn.callbacks import LearningRateStepScheduler
 from deepdna.nn.models import load_model
 from deepdna.nn.models.dnabert import DnaBertModel, DnaBertPretrainModel
 
@@ -49,8 +45,12 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--embed-dim", type=int, default=64)
     group.add_argument("--stack", type=int, default=8)
     group.add_argument("--num-heads", type=int, default=8)
+
+    group = context.get(dcs.module.Train).train_argument_parser
     group.add_argument("--mask-ratio", type=float, default=0.15)
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
+    group.add_argument("--init-lr", type=float, default=0.0)
+    group.add_argument("--warmup-steps", type=int, default=None)
 
     wandb = context.get(dcs.module.Wandb)
     group = wandb.argument_parser.add_argument_group("Logging")
@@ -103,7 +103,12 @@ def main(context: dcs.Context):
             validation_data=val_data,
             callbacks=[
                 tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
-                context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger()
+                context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger(),
+                LearningRateStepScheduler(
+                    init_lr = config.init_lr,
+                    max_lr=config.lr,
+                    warmup_steps=config.warmup_steps,
+                    end_steps=config.batches_per_epoch*config.epochs)
             ])
 
     # Artifact logging
@@ -125,6 +130,6 @@ if __name__ == "__main__":
             steps_per_epoch=100,
             val_steps_per_epoch=20)
     context.use(dcs.module.Rng)
-    context.use(dcs.module.Wandb)
+    context.use(dcs.module.Wandb).defaults(project="dnabert-pretrain")
     define_arguments(context)
     context.execute()
