@@ -164,6 +164,13 @@ class DnaBertEncoderModel(ModelWrapper, tf.keras.Model):
             "output_kmers": self.output_kmers
         }
 
+    @classmethod
+    def from_config(cls, config):
+        # Remove chunk_size from older model versions as it is unused.
+        if "chunk_size" in config:
+            del config["chunk_size"]
+        return super().from_config(config)
+
     @property
     def sequence_length(self):
         return self.base.sequence_length

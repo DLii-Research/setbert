@@ -142,7 +142,7 @@ class NaiveHierarchicalTaxonomyClassificationModel(AbstractHierarchicalTaxonomyC
 
 
 @CustomObject
-class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationModel):
+class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationModel[ModelType]):
     """
     From the official BERTax implementation.
 
@@ -172,7 +172,7 @@ class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationM
         constrained_indices = np.array([self.taxonomy_tokenizer.taxon_to_id_map[0][k] for k in head.keys()])
         taxons = []
         for rank, rank_pred in enumerate(y_pred):
-            taxon_id = (constrained_indices[np.argmax(rank_pred[constrained_indices])])
+            taxon_id = (constrained_indices[np.argmax(rank_pred[constrained_indices])]) # type: ignore
             taxon = self.taxonomy_tokenizer.id_to_taxon_map[rank][taxon_id]
             taxons.append(taxon)
             if rank < self.taxonomy_tokenizer.depth:
@@ -243,7 +243,7 @@ class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificat
             if y.ndim == 1:
                 result.append(taxonomy.join_taxonomy(self.taxonomy_tokenizer.id_to_taxons_map[-1][np.argmax(y)]))
             else:
-                result.append(self.predictions_to_labels(y))
+                result.append(self.predictions_to_labels(y)) # type: ignore
         return np.array(result)
 
     @classmethod
