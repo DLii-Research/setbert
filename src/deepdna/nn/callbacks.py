@@ -18,15 +18,3 @@ class LearningRateStepScheduler(tf.keras.callbacks.Callback):
             lr = self.max_lr - (self.max_lr)*(
                 (self.step - self.warmup_steps)/(self.end_steps - self.warmup_steps))
         self.model.optimizer.learning_rate.assign(lr)
-
-    def on_epoch_end(self, epoch, logs=None):
-        try:
-            import wandb
-        except ImportError:
-            return
-        if not wandb.run or wandb.run.disabled:
-            return
-        wandb.run.log({
-            "epoch": epoch,
-            "learning_rate": self.model.optimizer.learning_rate.numpy()
-        })
