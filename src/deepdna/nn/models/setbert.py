@@ -35,16 +35,13 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
     def build_model(self):
         y = x = tf.keras.layers.Input((None, self.embed_dim))
         y = layers.InjectClassToken(self.embed_dim)(y)
-        y = SetTransformerModel(self.embed_dim, self.num_heads, self.num_induce, self.stack, self.pre_layernorm)(y)
+        y = SetTransformerModel(
+            self.embed_dim,
+            self.num_heads,
+            self.num_induce,
+            self.stack,
+            self.pre_layernorm)(y)
         return tf.keras.Model(x, y)
-
-    @property
-    def kmer(self):
-        return self.dnabert_encoder.base.kmer
-
-    @property
-    def sequence_length(self):
-        return self.dnabert_encoder.base.sequence_length
 
     def __call__(
         self,
@@ -69,6 +66,14 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
             "num_induce": self.num_induce,
             "pre_layernorm": self.pre_layernorm
         }
+
+    @property
+    def kmer(self):
+        return self.dnabert_encoder.base.kmer
+
+    @property
+    def sequence_length(self):
+        return self.dnabert_encoder.base.sequence_length
 
 
 @CustomObject
@@ -126,23 +131,6 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
         self.compiled_metrics.update_state(y, y_pred) # type: ignore
         return {m.name: m.result() for m in self.metrics}
 
-    @property
-    def chunk_size(self):
-        return self.embed_layer.chunk_size if self.embed_layer is not None else None
-
-    @chunk_size.setter
-    def chunk_size(self, value):
-        assert self.embed_layer is not None
-        self.embed_layer.chunk_size = value
-
-    @property
-    def kmer(self):
-        return self.base.dnabert_encoder.base.kmer
-
-    @property
-    def sequence_length(self):
-        return self.base.dnabert_encoder.base.sequence_length
-
     def call(
         self,
         inputs,
@@ -183,6 +171,23 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
             "base": self.base,
             "mask_ratio": self.masking.mask_ratio.numpy() # type: ignore
         }
+
+    @property
+    def chunk_size(self):
+        return self.embed_layer.chunk_size if self.embed_layer is not None else None
+
+    @chunk_size.setter
+    def chunk_size(self, value):
+        assert self.embed_layer is not None
+        self.embed_layer.chunk_size = value
+
+    @property
+    def kmer(self):
+        return self.base.dnabert_encoder.base.kmer
+
+    @property
+    def sequence_length(self):
+        return self.base.dnabert_encoder.base.sequence_length
 
 
 @CustomObject
@@ -242,27 +247,6 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
             output += (sequences,)
         return tf.keras.Model(x, output + (scores,))
 
-    @property
-    def chunk_size(self):
-        return self.embed_layer.chunk_size if self.embed_layer is not None else None
-
-    @chunk_size.setter
-    def chunk_size(self, value):
-        assert self.embed_layer is not None
-        self.embed_layer.chunk_size = value
-
-    @property
-    def kmer(self):
-        return self.dnabert_encoder.base.kmer
-
-    @property
-    def sequence_length(self):
-        return self.dnabert_encoder.base.sequence_length
-
-    @property
-    def dnabert_encoder(self):
-        return self.base.dnabert_encoder
-
     def call(
         self,
         inputs,
@@ -295,3 +279,24 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
             "output_class": self.output_class,
             "output_sequences": self.output_sequences
         }
+
+    @property
+    def chunk_size(self):
+        return self.embed_layer.chunk_size if self.embed_layer is not None else None
+
+    @chunk_size.setter
+    def chunk_size(self, value):
+        assert self.embed_layer is not None
+        self.embed_layer.chunk_size = value
+
+    @property
+    def kmer(self):
+        return self.dnabert_encoder.base.kmer
+
+    @property
+    def sequence_length(self):
+        return self.dnabert_encoder.base.sequence_length
+
+    @property
+    def dnabert_encoder(self):
+        return self.base.dnabert_encoder
