@@ -1,13 +1,9 @@
-#!/bin/env python3
-"""
-Pre-train a SetBERT model using a pre-trained DNABERT model to bootstrap learning.
-"""
 import argparse
 from dnadb import sample
 import deepctx.scripting as dcs
 from deepctx.lazy import tensorflow as tf
 from pathlib import Path
-from deepdna.nn.data_generators import SequenceGenerator
+from deepdna.nn import data_generators as dg
 from deepdna.nn.losses import FastSortedLoss
 from deepdna.nn.models import load_model
 from deepdna.nn.models.dnabert import DnaBertEncoderModel, DnaBertPretrainModel
@@ -23,9 +19,11 @@ class PersistentSetBertPretrainModel(dcs.module.Wandb.PersistentObject[SetBertPr
             embed_dim=config.embed_dim,
             max_set_len=config.max_subsample_size,
             stack=config.stack,
-            num_heads=config.num_heads)
+            num_heads=config.num_heads,
+            num_induce=config.num_inducing_points)
         model = SetBertPretrainModel(base, mask_ratio=config.mask_ratio)
         model.chunk_size = config.chunk_size
+        model.summary()
         model.compile(
             optimizer=tf.keras.optimizers.Adam(config.lr),
             loss=FastSortedLoss())
@@ -56,6 +54,7 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--max-subsample-size", type=int, default=1000)
     group.add_argument("--stack", type=int, default=8)
     group.add_argument("--num-heads", type=int, default=8)
+    group.add_argument("--num-inducing-points", type=int, default=None)
     group.add_argument("--mask-ratio", type=float, default=0.15)
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
     group.add_argument("--chunk-size", type=int, default=None, help="The number of sequences to process at once. Ignored if --static-dnabert is not set.")
@@ -76,21 +75,24 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
             config.datasets_path / dataset / f"{dataset}.fasta.index.db",
             sample.SampleMode.Natural if config.distribution == "natural" else sample.SampleMode.PresenceAbsence)
     print(f"Found {len(samples)} samples.")
-    common_args = dict(
-        sequence_length=sequence_length,
-        kmer=kmer,
-        subsample_size=config.max_subsample_size)
-    train_data = SequenceGenerator(
-        samples,
-        batch_size=config.batch_size,
-        batches_per_epoch=config.steps_per_epoch,
-        **common_args) # type: ignore
-    val_data = SequenceGenerator(
-        samples,
-        batch_size=config.val_batch_size,
-        batches_per_epoch=config.val_steps_per_epoch,
-        shuffle=False,
-        **common_args) # type: ignore
+    generator_pipeline = [
+        dg.random_fasta_samples(samples),
+        dg.random_sequence_entries(subsample_size=config.max_subsample_size),
+        dg.sequences(length=sequence_length),
+        dg.augment_ambiguous_bases,
+        dg.encode_sequences(),
+        dg.encode_kmers(kmer),
+        lambda encoded_kmer_sequences: (encoded_kmer_sequences,)*2
+    ]
+    train_data = dg.BatchGenerator(
+        config.batch_size,
+        config.steps_per_epoch,
+        generator_pipeline)
+    val_data = dg.BatchGenerator(
+        config.val_batch_size,
+        config.val_steps_per_epoch,
+        generator_pipeline,
+        shuffle=False)
     return train_data, val_data
 
 
@@ -116,7 +118,8 @@ def main(context: dcs.Context):
             validation_data=val_data,
             callbacks=[
                 tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
-                context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger()
+                context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger(),
+                tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda *_: print(f"\nAverage Batch Generation Time: {train_data.average_batch_generation_time}"))
             ])
 
     # Artifact logging
@@ -134,6 +137,7 @@ if __name__ == "__main__":
         .use_steps() \
         .defaults(
             epochs=None,
+            batch_size=16,
             steps_per_epoch=100,
             val_steps_per_epoch=20)
     context.use(dcs.module.Rng)
