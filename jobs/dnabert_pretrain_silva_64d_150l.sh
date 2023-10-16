@@ -1,4 +1,6 @@
 #!/bin/bash
+#SBATCH --signal=INT@600
+
 source "$(dirname -- "$( readlink -f -- "$0"; )")/../env.sh"
 
 ${python_prefix} ${python_tf} ./scripts/training/dnabert_pretrain.py \
