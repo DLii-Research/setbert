@@ -41,7 +41,7 @@ class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.mode
         return model
 
     def load(self):
-        return load_model(self.path("model"), tf.keras.models.Model[SetBertEncoderModel])
+        return load_model(self.path("model"), tf.keras.models.Model)
 
     def save(self):
         self.instance.save(self.path("model"))
@@ -86,6 +86,13 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
     class_weights = np.array([0.5 / num_positive if targets[s.name] else 0.5 / num_negative for s in samples])
     print(f"Found {len(samples)} samples.")
     print(f"Positive: {num_positive}, Negative: {num_negative}")
+
+    # Fix nested array warnings
+    tmp = np.empty(len(samples), dtype=object)
+    tmp[:] = samples
+    samples = tmp
+    del tmp
+
     generator_pipeline = [
         lambda batch_size, np_rng: dict(samples=np_rng.choice(samples, batch_size, p=class_weights, replace=True)),
         dg.random_sequence_entries(subsample_size=config.subsample_size),
