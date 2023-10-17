@@ -94,7 +94,7 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
     del tmp
 
     generator_pipeline = [
-        lambda batch_size, np_rng: dict(samples=np_rng.choice(samples, batch_size, p=class_weights, replace=True)),
+        dg.random_fasta_samples(samples, weights=class_weights),
         dg.random_sequence_entries(subsample_size=config.subsample_size),
         dg.sequences(length=sequence_length),
         dg.augment_ambiguous_bases,
