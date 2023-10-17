@@ -125,6 +125,7 @@ def main(context: dcs.Context):
     # Artifact logging
     if config.log_artifact is not None:
         print("Logging artifact...")
+        model.instance # Load the model to ensure it is in-tact
         artifact = model.to_artifact(config.log_artifact)
         context.get(dcs.module.Wandb).log_artifact(artifact)
 
