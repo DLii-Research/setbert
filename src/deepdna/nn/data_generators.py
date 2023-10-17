@@ -86,7 +86,7 @@ def random_fasta_samples(
     samples = ndarray_from_iterable(samples)
 
     # Compute weights
-    if weights == "sample_size":
+    if isinstance(weights, str) and weights == "sample_size":
         p = np.array(list(map(len, samples)))
         p /= p.sum()
     else:
