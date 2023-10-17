@@ -5,7 +5,7 @@ import numpy.typing as npt
 import re
 import tensorflow as tf
 import time
-from typing import Any, Callable, Generic, Iterable, Optional, TypeVar
+from typing import Any, Callable, Generic, Iterable, Literal, Optional, TypeVar
 
 from .utils import ndarray_from_iterable, recursive_map
 
@@ -80,19 +80,19 @@ class BatchGenerator(tf.keras.utils.Sequence, Generic[IOType]):
 
 def random_fasta_samples(
     samples: Iterable[sample.FastaSample|sample.DemultiplexedFastaSample],
-    weighted: bool = False,
+    weights: npt.NDArray[np.float_]|Literal["sample_size"]|None = None,
 ):
     # Convert to numpy array
     samples = ndarray_from_iterable(samples)
 
     # Compute weights
-    if weighted:
-        weights = np.array(list(map(len, samples)))
-        weights /= weights.sum()
+    if weights == "sample_size":
+        p = np.array(list(map(len, samples)))
+        p /= p.sum()
     else:
-        weights = None
+        p = weights
     def factory(batch_size: int, np_rng: np.random.Generator):
-        return dict(samples=np_rng.choice(samples, size=batch_size, replace=True, p=weights))
+        return dict(samples=np_rng.choice(samples, size=batch_size, replace=True, p=p))
     return factory
 
 
