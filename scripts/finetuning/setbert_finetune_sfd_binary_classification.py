@@ -23,10 +23,10 @@ class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.mode
             stop_sequence_embedding_gradient=False,
             output_class=True,
             output_sequences=False)
-        model = tf.keras.Sequential([
-            setbert_encoder,
-            tf.keras.layers.Dense(1, activation="sigmoid")
-        ])
+        x = setbert_encoder.input
+        y = setbert_encoder.output
+        y = tf.keras.layers.Dense(1, activation="sigmoid", name="fungus_present")(y)
+        model = tf.keras.Model(x, y)
         model.compile(
             metrics=[
                 tf.keras.metrics.BinaryAccuracy(),
@@ -35,7 +35,7 @@ class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.mode
                 f1_score,
                 negative_predictive_value
             ],
-            loss=tf.keras.losses.BinaryCrossentropy(),
+            loss=tf.keras.losses.BinaryCrossentropy(from_logits=False),
             optimizer=tf.keras.optimizers.Adam(config.lr),
         )
         return model
@@ -100,9 +100,8 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
         dg.augment_ambiguous_bases,
         dg.encode_sequences(),
         dg.encode_kmers(kmer),
-        lambda samples, encoded_kmer_sequences: (
-            encoded_kmer_sequences,
-            np.array([targets[s.name] for s in samples]))
+        lambda samples: dict(targets=np.array([targets[s.name] for s in samples])),
+        lambda encoded_kmer_sequences, targets: (encoded_kmer_sequences, targets)
     ]
     train_data = dg.BatchGenerator(
         config.batch_size,
@@ -115,6 +114,7 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
         shuffle=False)
     return train_data, val_data
 
+
 def main(context: dcs.Context):
     config = context.config
 
@@ -126,19 +126,18 @@ def main(context: dcs.Context):
     # Training
     if config.train:
         print("Training model...")
-        setbert_encoder: SetBertEncoderModel = model.instance.layers[0]
+        setbert_base: SetBertEncoderModel = model.instance.layers[2]
         train_data, val_data = data_generators(
             config,
-            setbert_encoder.sequence_length,
-            setbert_encoder.kmer)
+            setbert_base.sequence_length,
+            setbert_base.kmer)
         model.path("model").mkdir(exist_ok=True, parents=True)
         context.get(dcs.module.Train).fit(
             model.instance,
             train_data,
             validation_data=val_data,
             callbacks=[
-                tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
-                context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger()
+                tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model")))
             ])
 
     # Artifact logging

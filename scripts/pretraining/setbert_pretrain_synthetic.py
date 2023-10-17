@@ -117,8 +117,7 @@ def main(context: dcs.Context):
             train_data,
             validation_data=val_data,
             callbacks=[
-                tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
-                context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger()
+                tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model")))
             ])
 
     # Artifact logging

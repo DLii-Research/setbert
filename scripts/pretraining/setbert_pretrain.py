@@ -118,7 +118,6 @@ def main(context: dcs.Context):
             validation_data=val_data,
             callbacks=[
                 tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
-                context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger(),
                 tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda *_: print(f"\nAverage Batch Generation Time: {train_data.average_batch_generation_time}"))
             ])
 

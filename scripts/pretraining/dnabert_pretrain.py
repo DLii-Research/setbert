@@ -103,7 +103,6 @@ def main(context: dcs.Context):
             validation_data=val_data,
             callbacks=[
                 tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
-                context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger(),
                 LearningRateStepScheduler(
                     init_lr = config.init_lr,
                     max_lr=config.lr,

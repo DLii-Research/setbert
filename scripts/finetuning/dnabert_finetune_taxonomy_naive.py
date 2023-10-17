@@ -110,15 +110,12 @@ def main(context: dcs.Context):
             model.instance.taxonomy_id_map)
         print(train_data[0])
         model.path("model").mkdir(exist_ok=True, parents=True)
-        run = context.get(dcs.module.Wandb).run
         context.get(dcs.module.Train).fit(
             model.instance,
             train_data,
             validation_data=val_data,
             callbacks=[
-                tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
-                context.get(dcs.module.Wandb).wandb.keras.WandbMetricsLogger(),
-                tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda *_: run.save(model.path("model")))
+                tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model")))
             ])
 
     # Artifact logging
