@@ -60,7 +60,7 @@ def define_arguments(context: dcs.Context):
 def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int):
     fasta_db = sample.load_fasta(config.sequences_fasta_db)
     print(f"Found {len(fasta_db):,} sequences.")
-    train_data = dg.BatchGenerator(config.batch_size, config.steps_per_epoch, [
+    generator_pipeline = [
         dg.random_fasta_samples([fasta_db]),
         dg.random_sequence_entries(),
         dg.sequences(length=sequence_length),
@@ -68,16 +68,16 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
         dg.encode_sequences(),
         dg.encode_kmers(kmer),
         lambda encoded_kmer_sequences: (encoded_kmer_sequences,)*2
-    ])
-    val_data = dg.BatchGenerator(config.val_batch_size, config.val_steps_per_epoch, [
-        dg.random_fasta_samples([fasta_db]),
-        dg.random_sequence_entries(),
-        dg.sequences(length=sequence_length),
-        dg.augment_ambiguous_bases,
-        dg.encode_sequences(),
-        dg.encode_kmers(kmer),
-        lambda encoded_kmer_sequences: (encoded_kmer_sequences,)*2
-    ], shuffle=False)
+    ]
+    train_data = dg.BatchGenerator(
+        config.batch_size,
+        config.steps_per_epoch,
+        generator_pipeline)
+    val_data = dg.BatchGenerator(
+        config.val_batch_size,
+        config.val_steps_per_epoch,
+        generator_pipeline,
+        shuffle=False)
     return train_data, val_data
 
 

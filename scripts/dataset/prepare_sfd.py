@@ -3,6 +3,7 @@ from dataclasses import replace
 from dnadb import dna, fasta, sample
 import deepctx.scripting as dcs
 import re
+import shutil
 from tqdm import tqdm
 
 import _common
@@ -20,6 +21,7 @@ def main(context: dcs.Context):
     fasta_path = config.input_path / "P_A_221205_cmfp.trim.contigs.pcr.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.opti_mcc.0.03.pick.0.03.abund.0.03.pick.fasta"
     otu_list_path = config.input_path / "221205_cmfp.trim.contigs.pcr.good.unique.good.filter.unique.precluster.denovo.vsearch.asv.list"
     otu_shared_path = config.input_path / "221205_cmfp.trim.contigs.pcr.good.unique.good.filter.unique.precluster.denovo.vsearch.asv.shared"
+    metadata_path = config.input_path / "230320_sfdspatial_meta_clean.csv"
 
     # Create FASTA DB
     factory = fasta.FastaDbFactory(output_path / f"{config.name}.fasta.db")
@@ -64,6 +66,8 @@ def main(context: dcs.Context):
             sample_factory.add_entry(fasta_db[fasta_id], count)
         factory.write_entry(sample_factory.build())
     factory.close()
+
+    shutil.copy(metadata_path, output_path / f"{config.name}.metadata.csv")
 
 
 if __name__ == "__main__":
