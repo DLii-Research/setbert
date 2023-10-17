@@ -20,7 +20,7 @@ class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.mode
         setbert_encoder = SetBertEncoderModel(
             setbert_base,
             compute_sequence_embeddings=True,
-            stop_sequence_embedding_gradient=True,
+            stop_sequence_embedding_gradient=False,
             output_class=True,
             output_sequences=False)
         model = tf.keras.Sequential([
@@ -38,7 +38,6 @@ class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.mode
             loss=tf.keras.losses.BinaryCrossentropy(),
             optimizer=tf.keras.optimizers.Adam(config.lr),
         )
-        setbert_encoder.chunk_size = 256
         return model
 
     def load(self):
