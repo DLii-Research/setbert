@@ -130,6 +130,8 @@ if __name__ == "__main__":
             steps_per_epoch=100,
             val_steps_per_epoch=20)
     context.use(dcs.module.Rng)
-    context.use(dcs.module.Wandb).defaults(project="dnabert-pretrain")
+    context.use(dcs.module.Wandb) \
+        .resumeable() \
+        .defaults(project="dnabert-pretrain")
     define_arguments(context)
     context.execute()

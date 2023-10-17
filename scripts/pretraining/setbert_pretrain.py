@@ -142,6 +142,8 @@ if __name__ == "__main__":
             steps_per_epoch=100,
             val_steps_per_epoch=20)
     context.use(dcs.module.Rng)
-    context.use(dcs.module.Wandb)
+    context.use(dcs.module.Wandb) \
+        .resumeable() \
+        .defaults(project="setbert-pretrain")
     define_arguments(context)
     context.execute()
