@@ -10,7 +10,6 @@ from tqdm import tqdm
 def define_arguments(context: dcs.Context):
     parser = context.argument_parser
     parser.add_argument("--dataset-path", type=Path, required=True)
-    parser.add_argument("--output-path", type=Path, required=True)
     parser.add_argument("--overwrite", default=False, action="store_true", help="Overwrite existing test files.")
 
     group = parser.add_argument_group("Dataset Settings")
@@ -26,13 +25,14 @@ def main(context: dcs.Context):
         config.dataset_path / f"{config.dataset_path.name}.fasta.index.db")
     print(f"Found {len(samples)} sample(s).")
 
-    config.output_path.mkdir(exist_ok=True)
+    output_path = config.dataset_path / "test"
+    output_path.mkdir(exist_ok=True)
 
     n_pad_zeros = int(np.ceil(np.log10(config.num_subsamples)))
 
     for s in tqdm(samples):
-        subsample = dg.BatchGenerator(10, 1, [
-            lambda: dict(samples=[s]),
+        subsample = dg.BatchGenerator(config.num_subsamples, 1, [
+            dg.random_fasta_samples([s]),
             dg.random_sequence_entries(config.subsample_size),
             dg.sequences(config.sequence_length),
             dg.augment_ambiguous_bases,
@@ -41,10 +41,10 @@ def main(context: dcs.Context):
         ])[0]
 
         for i, (fasta_ids, sequences) in enumerate(zip(*subsample)):
-            output_file = config.output_path / f"{s.name}.{i:0{n_pad_zeros}d}.fasta"
+            output_file = output_path / f"{s.name}.{i:0{n_pad_zeros}d}.fasta"
             if not config.overwrite and output_file.exists():
                 continue
-            with open(config.output_path / f"{s.name}.{i:0{n_pad_zeros}d}.fasta", 'w') as f:
+            with open(output_file, 'w') as f:
                 fasta.write(f, [
                     fasta.FastaEntry(
                         identifier=str(j),
