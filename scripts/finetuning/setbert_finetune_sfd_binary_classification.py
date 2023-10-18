@@ -27,6 +27,8 @@ class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.mode
         y = setbert_encoder.output
         y = tf.keras.layers.Dense(1, activation="sigmoid", name="fungus_present")(y)
         model = tf.keras.Model(x, y)
+        if config.freeze_sequence_embeddings:
+            setbert_encoder.chunk_size = config.chunk_size
         model.compile(
             metrics=[
                 tf.keras.metrics.BinaryAccuracy(),
@@ -60,7 +62,8 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--subsample-size", type=int, default=1000, help="The number of sequences per subsample")
 
     group = parser.add_argument_group("Model Settings")
-    group.add_argument("--freeze-sequence-embeddings", action="store_true", help="Freeze the sequence embeddings.")
+    group.add_argument("--freeze-sequence-embeddings", default=False, action="store_true", help="Freeze the sequence embeddings.")
+    group.add_argument("--chunk-size", type=int, default=None, help="The chunk size to use for the sequence embeddings. (Only used if --freeze-sequence-embeddings is set.)")
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
 
     wandb = context.get(dcs.module.Wandb)

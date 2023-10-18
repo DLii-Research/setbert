@@ -26,10 +26,12 @@ class PersistentSetBertTaxonomyModel(dcs.module.Wandb.PersistentObject[TopDownTa
             SetBertEncoderModel(
                 setbert_base,
                 compute_sequence_embeddings=True,
-                stop_sequence_embedding_gradient=False,
+                stop_sequence_embedding_gradient=config.freeze_sequence_embeddings,
                 output_class=False,
                 output_sequences=True),
             tokenizer)
+        if config.freeze_sequence_embeddings:
+            model.base.chunk_size = config.chunk_size
         model.compile(optimizer=tf.keras.optimizers.Adam(config.lr))
         return model
 
@@ -57,6 +59,8 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--rank-depth", type=int, default=6, help="The number of taxonomy ranks to classify to.")
 
     group = parser.add_argument_group("Model Settings")
+    group.add_argument("--freeze-sequence-embeddings", default=False, action="store_true", help="Freeze the sequence embeddings.")
+    group.add_argument("--chunk-size", type=int, default=None, help="The chunk size to use for the sequence embeddings. (Only used if --freeze-sequence-embeddings is set.)")
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
 
     wandb = context.get(dcs.module.Wandb)
