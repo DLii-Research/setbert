@@ -2,7 +2,6 @@ from dnadb import fasta, sample
 import deepctx.scripting as dcs
 from deepdna.nn import data_generators as dg
 from deepdna.nn.utils import recursive_map
-from itertools import count
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
