@@ -20,7 +20,7 @@ class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.mode
         setbert_encoder = SetBertEncoderModel(
             setbert_base,
             compute_sequence_embeddings=True,
-            stop_sequence_embedding_gradient=False,
+            stop_sequence_embedding_gradient=config.freeze_sequence_embeddings,
             output_class=True,
             output_sequences=False)
         x = setbert_encoder.input
@@ -60,6 +60,7 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--subsample-size", type=int, default=1000, help="The number of sequences per subsample")
 
     group = parser.add_argument_group("Model Settings")
+    group.add_argument("--freeze-sequence-embeddings", action="store_true", help="Freeze the sequence embeddings.")
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
 
     wandb = context.get(dcs.module.Wandb)
