@@ -7,9 +7,8 @@ import pandas as pd
 from pathlib import Path
 from deepdna.nn import data_generators as dg
 from deepdna.nn.metrics import f1_score, negative_predictive_value
-from deepdna.nn.layers import ChunkedEmbeddingLayer
 from deepdna.nn.models import load_model
-from deepdna.nn.models.setbert import SetBertModel, SetBertEncoderModel, SetBertPretrainModel
+from deepdna.nn.models.setbert import SetBertEncoderModel, SetBertPretrainModel
 from deepdna.nn.utils import find_layers
 
 
