@@ -8,7 +8,7 @@ from pathlib import Path
 from deepdna.nn import data_generators as dg
 from deepdna.nn.metrics import f1_score, negative_predictive_value
 from deepdna.nn.models import load_model
-from deepdna.nn.models.setbert import SetBertEncoderModel, SetBertPretrainModel
+from deepdna.nn.models.setbert import SetBertModel, SetBertEncoderModel, SetBertPretrainModel
 from deepdna.nn.utils import find_layers
 
 
@@ -131,7 +131,7 @@ def main(context: dcs.Context):
     # Training
     if config.train:
         print("Training model...")
-        setbert_base = next(find_layers(model.instance, SetBertEncoderModel))
+        setbert_base = next(find_layers(model.instance, SetBertModel))
         train_data, val_data = data_generators(
             config,
             setbert_base.sequence_length,
