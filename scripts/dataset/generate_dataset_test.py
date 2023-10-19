@@ -30,19 +30,19 @@ def main(context: dcs.Context):
     n_pad_zeros = int(np.ceil(np.log10(config.num_subsamples)))
 
     for s in tqdm(samples):
-        subsample = dg.BatchGenerator(config.num_subsamples, 1, [
+        subsamples = dg.BatchGenerator(1, config.num_subsamples, [
             dg.random_fasta_samples([s]),
             dg.random_sequence_entries(config.subsample_size),
             dg.sequences(config.sequence_length),
             dg.augment_ambiguous_bases,
             lambda sequence_entries: dict(fasta_ids=recursive_map(lambda e: e.identifier, sequence_entries)),
             lambda fasta_ids, sequences: (fasta_ids, sequences)
-        ])[0]
-
-        for i, (fasta_ids, sequences) in enumerate(zip(*subsample)):
+        ])
+        for i in range(len(subsamples)):
             output_file = output_path / f"{s.name}.{i:0{n_pad_zeros}d}.fasta"
             if not config.overwrite and output_file.exists():
                 continue
+            (fasta_ids, sequences) = subsamples[i]
             with open(output_file, 'w') as f:
                 fasta.write(f, [
                     fasta.FastaEntry(
