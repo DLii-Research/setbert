@@ -250,14 +250,11 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
     def call(
         self,
         inputs,
-        compute_sequence_embeddings: bool = True,
         return_attention_scores: bool = False,
         training: bool|None = None,
         **kwargs
     ):
         model = self.get_model(return_attention_scores)
-        if compute_sequence_embeddings and not self.compute_sequence_embeddings:
-            inputs = tf.stop_gradient(self.base.dnabert_encoder.encode(inputs))
         return model(inputs, training=training)
 
     def __call__(

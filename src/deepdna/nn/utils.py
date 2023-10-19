@@ -1,7 +1,7 @@
 import numpy as np
 import numpy.typing as npt
 import tensorflow as tf
-from typing import Any, Callable, cast, TypeVar
+from typing import Any, Callable, cast, Generator, TypeVar
 
 class PostInit(type):
     """
@@ -43,6 +43,20 @@ def recursive_map(
 # Tensorflow Utilities -----------------------------------------------------------------------------
 
 TensorflowObject = TypeVar("TensorflowObject")
+
+T = TypeVar("T")
+def find_layers(model_or_layer, model_or_layer_type: type[T]) -> Generator[T, None, None]:
+    """
+    Find all layers of the given type in the given model or layer.
+    """
+    q: list[tf.keras.models.Model|tf.keras.layers.Layer] = [model_or_layer]
+    while len(q) > 0:
+        layer: tf.keras.models.Model|tf.keras.layers.Layer = q.pop(0)
+        if isinstance(layer, model_or_layer_type):
+            yield layer
+        if hasattr(layer, "layers"):
+            q += list(layer.layers) # type: ignore
+
 
 def tfcast(value: TensorflowObject, dtype: tf.DType, name: str|None = None) -> TensorflowObject:
     """
