@@ -670,6 +670,7 @@ class SetMask(tf.keras.layers.Layer):
 
 # Time-distributed Layers --------------------------------------------------------------------------
 
+@CustomObject
 class ChunkedEmbeddingLayer(TypedLayer[[tf.Tensor], tf.Tensor]):
     """
     A time distributed layer that evaluates in chunks.
