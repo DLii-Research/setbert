@@ -25,8 +25,8 @@ class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.mode
             stop_sequence_embedding_gradient=config.freeze_sequence_embeddings,
             output_class=True,
             output_sequences=False)
-        x = setbert_encoder.input
-        y = setbert_encoder.output
+        y = x = tf.keras.layers.Input(setbert_encoder.input_shape[1:])
+        y = setbert_encoder(y)
         y = tf.keras.layers.Dense(1, activation="sigmoid", name="fungus_present")(y)
         model = tf.keras.Model(x, y)
         model.compile(
@@ -130,14 +130,15 @@ def main(context: dcs.Context):
     # Training
     if config.train:
         print("Training model...")
+        setbert_encoder = next(find_layers(model.instance, SetBertEncoderModel))
         if config.freeze_sequence_embeddings:
-            embedding_layer = next(find_layers(model.instance, ChunkedEmbeddingLayer))
-            embedding_layer.chunk_size = config.chunk_size
-        setbert_base = next(find_layers(model.instance, SetBertModel))
+            setbert_encoder.chunk_size = config.chunk_size
+        else:
+            setbert_encoder.chunk_size = None
         train_data, val_data = data_generators(
             config,
-            setbert_base.sequence_length,
-            setbert_base.kmer)
+            setbert_encoder.sequence_length,
+            setbert_encoder.kmer)
         model.path("model").mkdir(exist_ok=True, parents=True)
         context.get(dcs.module.Train).fit(
             model.instance,
