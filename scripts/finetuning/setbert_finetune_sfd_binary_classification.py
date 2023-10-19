@@ -9,6 +9,7 @@ from deepdna.nn import data_generators as dg
 from deepdna.nn.metrics import f1_score, negative_predictive_value
 from deepdna.nn.models import load_model
 from deepdna.nn.models.setbert import SetBertEncoderModel, SetBertPretrainModel
+from deepdna.nn.utils import find_layers
 
 
 class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.models.Model"]):
@@ -130,7 +131,7 @@ def main(context: dcs.Context):
     # Training
     if config.train:
         print("Training model...")
-        setbert_base: SetBertEncoderModel = model.instance.layers[2]
+        setbert_base = next(find_layers(model.instance, SetBertEncoderModel))
         train_data, val_data = data_generators(
             config,
             setbert_base.sequence_length,
