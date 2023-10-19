@@ -7,6 +7,7 @@ import pandas as pd
 from pathlib import Path
 from deepdna.nn import data_generators as dg
 from deepdna.nn.metrics import f1_score, negative_predictive_value
+from deepdna.nn.layers import ChunkedEmbeddingLayer
 from deepdna.nn.models import load_model
 from deepdna.nn.models.setbert import SetBertModel, SetBertEncoderModel, SetBertPretrainModel
 from deepdna.nn.utils import find_layers
@@ -28,8 +29,6 @@ class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.mode
         y = setbert_encoder.output
         y = tf.keras.layers.Dense(1, activation="sigmoid", name="fungus_present")(y)
         model = tf.keras.Model(x, y)
-        if config.freeze_sequence_embeddings:
-            setbert_encoder.chunk_size = config.chunk_size
         model.compile(
             metrics=[
                 tf.keras.metrics.BinaryAccuracy(),
@@ -131,6 +130,9 @@ def main(context: dcs.Context):
     # Training
     if config.train:
         print("Training model...")
+        if config.freeze_sequence_embeddings:
+            embedding_layer = next(find_layers(model.instance, ChunkedEmbeddingLayer))
+            embedding_layer.chunk_size = config.chunk_size
         setbert_base = next(find_layers(model.instance, SetBertModel))
         train_data, val_data = data_generators(
             config,
