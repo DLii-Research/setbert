@@ -1,5 +1,3 @@
-#!/opt/conda/envs/qiime2-2022.8/bin/python3
-
 import argparse
 import joblib
 from pathlib import Path
