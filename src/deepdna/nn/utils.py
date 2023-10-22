@@ -45,7 +45,7 @@ def recursive_map(
 TensorflowObject = TypeVar("TensorflowObject")
 
 T = TypeVar("T")
-def find_layers(model_or_layer, model_or_layer_type: type[T]) -> Generator[T, None, None]:
+def find_layers(model_or_layer, model_or_layer_type: type[T], recursive: bool = True) -> Generator[T, None, None]:
     """
     Find all layers of the given type in the given model or layer.
     """
@@ -54,7 +54,7 @@ def find_layers(model_or_layer, model_or_layer_type: type[T]) -> Generator[T, No
         layer: tf.keras.models.Model|tf.keras.layers.Layer = q.pop(0)
         if isinstance(layer, model_or_layer_type):
             yield layer
-        if hasattr(layer, "layers"):
+        if recursive and hasattr(layer, "layers"):
             q += list(layer.layers) # type: ignore
 
 
