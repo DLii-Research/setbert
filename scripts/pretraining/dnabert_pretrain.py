@@ -50,7 +50,7 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--mask-ratio", type=float, default=0.15)
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
     group.add_argument("--init-lr", type=float, default=0.0)
-    group.add_argument("--warmup-steps", type=int, default=None)
+    group.add_argument("--warmup-steps", type=int, default=10000)
 
     wandb = context.get(dcs.module.Wandb)
     group = wandb.argument_parser.add_argument_group("Logging")
@@ -107,7 +107,7 @@ def main(context: dcs.Context):
                     init_lr = config.init_lr,
                     max_lr=config.lr,
                     warmup_steps=config.warmup_steps,
-                    end_steps=config.batches_per_epoch*config.epochs)
+                    end_steps=config.steps_per_epoch*config.epochs)
             ])
 
     # Artifact logging
