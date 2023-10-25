@@ -123,14 +123,14 @@ class CustomModel(keras.Model):
 
     def compile(
         self,
-        optimizer="rmsprop",
-        loss="default",
-        metrics="default",
-        loss_weights=None,
-        weighted_metrics=None,
-        run_eagerly=None,
-        steps_per_execution=None,
-        jit_compile=None,
+        optimizer: Any="rmsprop",
+        loss: Any="default",
+        metrics: Any="default",
+        loss_weights: Any=None,
+        weighted_metrics: Any=None,
+        run_eagerly: Any=None,
+        steps_per_execution: Any=None,
+        jit_compile: Any=None,
         **kwargs
     ):
         """

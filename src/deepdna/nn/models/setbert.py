@@ -6,6 +6,7 @@ from .transformer import AttentionScoreProvider, SetTransformerModel
 from .custom_model import ModelWrapper, CustomModel
 from .. import layers
 from ..losses import SortedLoss
+from ..metrics import f1_score, negative_predictive_value
 from ..registry import CustomObject
 
 
@@ -297,3 +298,34 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
     @property
     def dnabert_encoder(self):
         return self.base.dnabert_encoder
+
+
+class SetBertSfdClassifierModel(ModelWrapper, CustomModel):
+    def __init__(self, base: SetBertModel, freeze_sequence_embeddings: bool, **kwargs):
+        super().__init__(**kwargs)
+        self.base = base
+        self.freeze_sequence_embeddings = freeze_sequence_embeddings
+
+    def build_model(self):
+        setbert_encoder = SetBertEncoderModel(
+            self.base,
+            compute_sequence_embeddings=True,
+            stop_sequence_embedding_gradient=self.freeze_sequence_embeddings,
+            output_class=True,
+            output_sequences=False)
+        y = x = tf.keras.layers.Input(setbert_encoder.input_shape[1:])
+        y = setbert_encoder(y)
+        y = tf.keras.layers.Dense(1, activation="sigmoid", name="fungus_present")(y)
+        return tf.keras.Model(x, y)
+
+    def default_loss(self):
+        return tf.keras.losses.BinaryCrossentropy(from_logits=False)
+
+    def default_metrics(self):
+        return [
+            tf.keras.metrics.BinaryAccuracy(),
+            tf.keras.metrics.Precision(name="precision_ppv"),
+            tf.keras.metrics.Recall(),
+            f1_score,
+            negative_predictive_value
+        ]

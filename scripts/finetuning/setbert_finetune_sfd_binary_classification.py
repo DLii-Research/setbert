@@ -6,9 +6,8 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from deepdna.nn import data_generators as dg
-from deepdna.nn.metrics import f1_score, negative_predictive_value
 from deepdna.nn.models import load_model
-from deepdna.nn.models.setbert import SetBertEncoderModel, SetBertPretrainModel
+from deepdna.nn.models.setbert import SetBertEncoderModel, SetBertPretrainModel, SetBertSfdClassifierModel
 from deepdna.nn.utils import find_layers
 
 
@@ -18,27 +17,8 @@ class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.mode
         wandb = self.context.get(dcs.module.Wandb)
         setbert_pretrain_path = wandb.artifact_argument_path("setbert_pretrain")
         setbert_base = load_model(setbert_pretrain_path, SetBertPretrainModel).base
-        setbert_encoder = SetBertEncoderModel(
-            setbert_base,
-            compute_sequence_embeddings=True,
-            stop_sequence_embedding_gradient=config.freeze_sequence_embeddings,
-            output_class=True,
-            output_sequences=False)
-        y = x = tf.keras.layers.Input(setbert_encoder.input_shape[1:])
-        y = setbert_encoder(y)
-        y = tf.keras.layers.Dense(1, activation="sigmoid", name="fungus_present")(y)
-        model = tf.keras.Model(x, y)
-        model.compile(
-            metrics=[
-                tf.keras.metrics.BinaryAccuracy(),
-                tf.keras.metrics.Precision(name="precision_ppv"),
-                tf.keras.metrics.Recall(),
-                f1_score,
-                negative_predictive_value
-            ],
-            loss=tf.keras.losses.BinaryCrossentropy(from_logits=False),
-            optimizer=tf.keras.optimizers.Adam(config.lr),
-        )
+        model = SetBertSfdClassifierModel(setbert_base, config.freeze_sequence_embeddings)
+        model.compile(optimizer=tf.keras.optimizers.Adam(config.lr))
         return model
 
     def load(self):
@@ -64,6 +44,9 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--freeze-sequence-embeddings", default=False, action="store_true", help="Freeze the sequence embeddings.")
     group.add_argument("--chunk-size", type=int, default=None, help="The chunk size to use for the sequence embeddings. (Only used if --freeze-sequence-embeddings is set.)")
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
+
+    training = context.get(dcs.module.Train)
+    training.train_argument_parser.add_argument("--subbatch-size", type=int, default=None, help="Accumulate gradients using sub-batching.")
 
     wandb = context.get(dcs.module.Wandb)
     wandb.add_artifact_argument("setbert-pretrain", required=True)
@@ -145,7 +128,8 @@ def main(context: dcs.Context):
             validation_data=val_data,
             callbacks=[
                 tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model")))
-            ])
+            ],
+            subbatch_size=config.subbatch_size)
 
     # Artifact logging
     if config.log_artifact is not None:
