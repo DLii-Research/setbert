@@ -1,7 +1,7 @@
 import abc
 import keras
 import tensorflow as tf
-from typing import Any, Callable, Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 from ..utils import GradientAccumulator, PostInit
 
 ModelType = TypeVar("ModelType", bound=keras.Model)
@@ -105,7 +105,7 @@ class CustomModel(keras.Model):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._accumulation_steps: int|None = None
+        self._accumulation_steps: int = 1
         self._gradient_accumulator: GradientAccumulator
 
     def default_loss(self):
@@ -162,7 +162,7 @@ class CustomModel(keras.Model):
         """
         The standard training regime supporting accumulating gradients for large batch training.
         """
-        if self._accumulation_steps is None:
+        if self._accumulation_steps == 1:
             return super().train_step(batch)
         # Compute gradients and update metrics
         x, y = batch
@@ -182,11 +182,12 @@ class CustomModel(keras.Model):
             lambda: None)
         return {m.name: m.result() for m in self.metrics}
 
-    def fit(self, *args, accumulation_steps: Optional[int] = None, **kwargs):
+    def fit(self, *args, accumulation_steps: int = 1, **kwargs):
+        assert accumulation_steps > 0, "Accumulation steps cannot be less than 1."
         if accumulation_steps != self._accumulation_steps:
             self._accumulation_steps = accumulation_steps
             self.train_function = None
-        if accumulation_steps is not None:
+        if accumulation_steps > 1:
             self._gradient_accumulator = GradientAccumulator(self.trainable_weights)
         history = super().fit(*args, **kwargs)
         del self._gradient_accumulator
