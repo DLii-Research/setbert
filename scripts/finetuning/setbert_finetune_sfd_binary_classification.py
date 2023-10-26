@@ -45,9 +45,6 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--chunk-size", type=int, default=None, help="The chunk size to use for the sequence embeddings. (Only used if --freeze-sequence-embeddings is set.)")
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
 
-    training = context.get(dcs.module.Train)
-    training.train_argument_parser.add_argument("--subbatch-size", type=int, default=None, help="Accumulate gradients using sub-batching.")
-
     wandb = context.get(dcs.module.Wandb)
     wandb.add_artifact_argument("setbert-pretrain", required=True)
 
@@ -55,7 +52,8 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--log-artifact", type=str, default=None, help="Log the model as a W&B artifact.")
 
 
-def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int):
+def data_generators(context: dcs.Context, sequence_length: int, kmer: int):
+    config = context.config
     metadata = pd.read_csv(config.sfd_dataset_path / f"{config.sfd_dataset_path.name}.metadata.csv")
     targets = dict(zip(metadata["swab_label"], metadata["oo_present"]))
     samples = [s for s in sample.load_multiplexed_fasta(
@@ -89,9 +87,12 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
         lambda samples: dict(targets=np.array([targets[s.name] for s in samples])),
         lambda encoded_kmer_sequences, targets: (encoded_kmer_sequences, targets)
     ]
+
+    training = context.get(dcs.module.Train)
+
     train_data = dg.BatchGenerator(
-        config.batch_size,
-        config.steps_per_epoch,
+        training.batch_size,
+        training.steps_per_epoch,
         generator_pipeline)
     val_data = dg.BatchGenerator(
         config.val_batch_size,
@@ -118,7 +119,7 @@ def main(context: dcs.Context):
         else:
             setbert_encoder.chunk_size = None
         train_data, val_data = data_generators(
-            config,
+            context,
             setbert_encoder.sequence_length,
             setbert_encoder.kmer)
         model.path("model").mkdir(exist_ok=True, parents=True)
@@ -129,7 +130,7 @@ def main(context: dcs.Context):
             callbacks=[
                 tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model")))
             ],
-            subbatch_size=config.subbatch_size)
+            accumulation_steps=config.accumulation_steps)
 
     # Artifact logging
     if config.log_artifact is not None:
@@ -144,6 +145,7 @@ if __name__ == "__main__":
     context.use(dcs.module.Tensorflow)
     context.use(dcs.module.Train) \
         .optional_training() \
+        .use_gradient_accumulation() \
         .use_steps() \
         .defaults(
             epochs=None,
