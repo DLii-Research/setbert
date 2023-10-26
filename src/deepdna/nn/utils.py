@@ -77,6 +77,25 @@ def optimizer(name: str, **kwargs) -> tf.keras.optimizers.Optimizer:
 
 # Model/Layer Utilities ----------------------------------------------------------------------------
 
+class GradientAccumulator:
+    def __init__(self, trainable_weights: list[tf.Variable]):
+        self.trainable_weights = trainable_weights
+        self.iteration = tf.Variable(0, dtype=tf.int64, trainable=False)
+        self._accumulated_gradients = [
+            tf.Variable(tf.zeros_like(w, dtype=tf.float32), trainable=False)
+            for w in self.trainable_weights]
+
+    def accumulate(self, gradients):
+        for grad, accumulated_grad in zip(gradients, self._accumulated_gradients):
+            accumulated_grad.assign_add(grad)
+        self.iteration.assign_add(1)
+
+    def apply_gradients(self, optimizer):
+        optimizer.apply_gradients(zip(self._accumulated_gradients, self.trainable_weights))
+        for grad in self._accumulated_gradients:
+            grad.assign(tf.zeros_like(grad))
+        self.iteration.assign(0)
+
 T = TypeVar("T")
 
 def accumulate(a: T, b: T) -> T:

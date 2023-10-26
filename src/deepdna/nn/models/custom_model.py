@@ -2,7 +2,7 @@ import abc
 import keras
 import tensorflow as tf
 from typing import Any, Callable, Generic, Optional, TypeVar
-from ..utils import accumulate_train_step, PostInit
+from ..utils import GradientAccumulator, PostInit
 
 ModelType = TypeVar("ModelType", bound=keras.Model)
 class ModelWrapper(Generic[ModelType], metaclass=PostInit):
@@ -103,11 +103,10 @@ class CustomModel(keras.Model):
     """
     Custom Keras model with extended functionality.
     """
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.subbatching: bool = False # temporary for testing/debugging
-        self.__subbatch_size = tf.constant(2**31 - 1, dtype=tf.int32) # max int32
+        self._accumulation_steps: int|None = None
+        self._gradient_accumulator: GradientAccumulator
 
     def default_loss(self):
         """
@@ -163,28 +162,35 @@ class CustomModel(keras.Model):
         """
         The standard training regime supporting accumulating gradients for large batch training.
         """
-        if not self.subbatching or tf.shape(batch)[0] < self.__subbatch_size:
+        if self._accumulation_steps is None:
             return super().train_step(batch)
-        def step(batch):
-            x, y = batch
-            with tf.GradientTape() as tape:
-                y_pred = self(x, training=True) # type: ignore
-                assert self.compiled_loss is not None
-                loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
-            grads = tape.gradient(loss, self.trainable_weights)
-            assert self.compiled_metrics is not None
-            self.compiled_metrics.update_state(y, y_pred)
-
-            return [], [grads]
-        _, (grads,) = accumulate_train_step(step, batch, self.subbatch_size, self)
-        self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
+        # Compute gradients and update metrics
+        x, y = batch
+        with tf.GradientTape() as tape:
+            y_pred = self(x, training=True) # type: ignore
+            assert self.compiled_loss is not None
+            loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
+        grads = tape.gradient(loss, self.trainable_weights)
+        assert self.compiled_metrics is not None
+        self.compiled_metrics.update_state(y, y_pred)
+        # Accumulate the gradients
+        self._gradient_accumulator.accumulate(grads)
+        # Apply the gradients
+        tf.cond(
+            self._gradient_accumulator.iteration == self._accumulation_steps,
+            lambda: self._gradient_accumulator.apply_gradients(self.optimizer),
+            lambda: None)
         return {m.name: m.result() for m in self.metrics}
 
-    def fit(self, *args, subbatch_size=None, **kwargs):
-        if subbatch_size is None or subbatch_size <= 0:
-            subbatch_size = tf.constant(2**31 - 1, dtype=tf.int32)
-        self.__subbatch_size = subbatch_size
-        return super().fit(*args, **kwargs)
+    def fit(self, *args, accumulation_steps: Optional[int] = None, **kwargs):
+        if accumulation_steps != self._accumulation_steps:
+            self._accumulation_steps = accumulation_steps
+            self.train_function = None
+        if accumulation_steps is not None:
+            self._gradient_accumulator = GradientAccumulator(self.trainable_weights)
+        history = super().fit(*args, **kwargs)
+        del self._gradient_accumulator
+        return history
 
     def __call__(self, *args, **kwargs) -> tf.Tensor:
         return super().__call__(*args, **kwargs) # type: ignore
