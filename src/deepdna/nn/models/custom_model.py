@@ -1,15 +1,21 @@
 import abc
-import keras
 import tensorflow as tf
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, TYPE_CHECKING
 from ..utils import GradientAccumulator, PostInit
 
-ModelType = TypeVar("ModelType", bound=keras.Model)
+if TYPE_CHECKING:
+    import keras
+
+ModelType = TypeVar("ModelType", bound="keras.Model")
 class ModelWrapper(Generic[ModelType], metaclass=PostInit):
     """
     For models that wrap a model to add extended functionality,
     this class ties the model wrapper's properties to the nested
     model's properties, along with a generic call method.
+
+    When wrapping a model, nested components should be stored in self.components rather than
+    as attributes on the model itself. This prevents errors/warnings in Tensorflow when loading
+    a saved model.
     """
     def __init__(self, *args, auto_build=False, **kwargs):
         super().__init__(*args, **kwargs)
@@ -20,6 +26,10 @@ class ModelWrapper(Generic[ModelType], metaclass=PostInit):
         self.model = self.build_model()
         if self._auto_build:
             self.initialize_model()
+
+    def set_components(self, **kwargs):
+        for name, component in kwargs.items():
+            object.__setattr__(self, name, component)
 
     def build_model(self) -> ModelType:
         raise NotImplementedError()
@@ -99,7 +109,7 @@ class ModelWrapper(Generic[ModelType], metaclass=PostInit):
         super().__setattr__(name, value)
 
 
-class CustomModel(keras.Model):
+class CustomModel(tf.keras.Model):
     """
     Custom Keras model with extended functionality.
     """

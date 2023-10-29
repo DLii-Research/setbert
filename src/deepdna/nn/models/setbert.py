@@ -1,5 +1,5 @@
 import tensorflow as tf
-from typing import Optional
+from typing import Optional, TypedDict
 
 from .dnabert import DnaBertEncoderModel
 from .transformer import AttentionScoreProvider, SetTransformerModel
@@ -12,6 +12,10 @@ from ..registry import CustomObject
 
 @CustomObject
 class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
+
+    Components = TypedDict("Components", {"dnabert_encoder": DnaBertEncoderModel})
+    components: Components
+
     def __init__(
         self,
         dnabert_encoder: DnaBertEncoderModel,
@@ -24,7 +28,7 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.dnabert_encoder = dnabert_encoder
+        self.components["dnabert_encoder"] = dnabert_encoder
         self.embed_dim = embed_dim
         self.max_set_len = max_set_len
         self.stack = stack
@@ -32,6 +36,10 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self.num_induce = num_induce
         self.pre_layernorm = pre_layernorm
         self.mha_layers = []
+
+    @property
+    def dnabert_encoder(self):
+        return self.components["dnabert_encoder"]
 
     def build_model(self):
         y = x = tf.keras.layers.Input((None, self.embed_dim))
@@ -79,6 +87,9 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
 
 @CustomObject
 class SetBertPretrainModel(ModelWrapper, CustomModel):
+
+    base: SetBertModel
+
     def __init__(
         self,
         base: SetBertModel,
@@ -86,7 +97,7 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.base = base
+        self.set_components(base=base)
         self.masking = layers.SetMask(self.base.embed_dim, self.base.max_set_len, mask_ratio)
         self.embed_layer: layers.ChunkedEmbeddingLayer|None = None
 
@@ -193,6 +204,9 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
 
 @CustomObject
 class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
+
+    base: SetBertModel
+
     def __init__(
         self,
         base: SetBertModel,
@@ -203,7 +217,7 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.base = base
+        self.set_components(base=base)
         self.compute_sequence_embeddings = compute_sequence_embeddings
         self.stop_sequence_embedding_gradient = stop_sequence_embedding_gradient
         self.output_class = output_class
@@ -301,9 +315,12 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
 
 
 class SetBertSfdClassifierModel(ModelWrapper, CustomModel):
+
+    base: SetBertModel
+
     def __init__(self, base: SetBertModel, freeze_sequence_embeddings: bool, **kwargs):
         super().__init__(**kwargs)
-        self.base = base
+        self.set_components(base=base)
         self.freeze_sequence_embeddings = freeze_sequence_embeddings
 
     def build_model(self):

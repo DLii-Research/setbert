@@ -3,14 +3,17 @@ from dnadb import taxonomy
 import numpy as np
 import numpy.typing as npt
 import tensorflow as tf
-from typing import Generic, Optional, TypeVar
+from typing import cast, Generic, Optional, TypeVar, TYPE_CHECKING
 
 from .custom_model import ModelWrapper, CustomModel
 from ..registry import CustomObject
 from ..utils import encapsulate_model
 from ...data.tokenizers import AbstractTaxonomyTokenizer, NaiveTaxonomyTokenizer, TopDownTaxonomyTokenizer
 
-ModelType = TypeVar("ModelType", bound=tf.keras.Model)
+if TYPE_CHECKING:
+    import keras
+
+ModelType = TypeVar("ModelType", bound="keras.Model")
 TokenizerType = TypeVar("TokenizerType", bound=AbstractTaxonomyTokenizer)
 
 class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel):
@@ -36,6 +39,9 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel):
 
 @CustomObject
 class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel, Generic[ModelType]):
+
+    base: ModelType
+
     def __init__(
         self,
         base: ModelType,
@@ -43,7 +49,7 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel, Gene
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.base = base
+        self.set_components(base=base)
         self.taxonomy_id_map = taxonomy_id_map
         self.model = self.build_model()
 
@@ -95,9 +101,12 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel, Gene
 
 
 class AbstractHierarchicalTaxonomyClassificationModel(AbstractTaxonomyClassificationModel, Generic[ModelType, TokenizerType]):
+
+    base: ModelType
+
     def __init__(self, base: ModelType, taxonomy_tokenizer: TokenizerType, **kwargs):
         super().__init__(**kwargs)
-        self.base = base
+        self.set_components(base=base)
         self.taxonomy_tokenizer = taxonomy_tokenizer
 
     def default_loss(self):
@@ -197,9 +206,12 @@ class BertaxTaxonomyClassificationModel(NaiveHierarchicalTaxonomyClassificationM
 
 @CustomObject
 class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificationModel[ModelType, TopDownTaxonomyTokenizer]):
+
+    _predictive_model: "keras.Model|None"
+
     def __init__(self, base: ModelType, taxonomy_tokenizer: TopDownTaxonomyTokenizer, **kwargs):
         super().__init__(base, taxonomy_tokenizer, **kwargs)
-        self._predictive_model: tf.keras.Model|None = None
+        self.set_component("_predictive_model", None)
 
     def build_model(self):
         gate_indices = []
@@ -234,8 +246,8 @@ class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificat
         if self._predictive_model is None:
             depth = self.taxonomy_tokenizer.depth
             outputs = [self.model.layers[3*i + 2].output for i in range(depth)]
-            self._predictive_model = tf.keras.Model(self.input, outputs)
-        return self._predictive_model
+            self.set_component("_predictive_model", tf.keras.Model(self.input, outputs))
+        return cast(keras.Model, self._predictive_model)
 
     def predictions_to_labels(self, y_pred: tuple[tf.Tensor, ...]):
         result = []

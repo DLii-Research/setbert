@@ -60,12 +60,13 @@ class DnaBertModel(ModelWrapper, CustomModel):
             "num_bases": self.num_bases
         }
 
-
 @CustomObject
 class DnaBertPretrainModel(ModelWrapper, CustomModel):
     """
     The DNABERT pretraining model architecture
     """
+    base: DnaBertModel
+
     def __init__(
         self,
         base: DnaBertModel,
@@ -75,7 +76,7 @@ class DnaBertPretrainModel(ModelWrapper, CustomModel):
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.base = base
+        self.set_components(base=base)
         self.max_len = self.base.sequence_length if max_len is None else max_len
         self.min_len = self.max_len if min_len is None else min_len
         assert self.min_len <= self.max_len
@@ -131,6 +132,9 @@ class DnaBertEncoderModel(ModelWrapper, tf.keras.Model):
     """
     The DNABERT encoder/embedding model architecture
     """
+
+    base: DnaBertModel
+
     def __init__(
         self,
         base: DnaBertModel,
@@ -139,7 +143,7 @@ class DnaBertEncoderModel(ModelWrapper, tf.keras.Model):
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.base = base
+        self.set_components(base=base)
         self.output_class = output_class
         self.output_kmers = output_kmers
 
