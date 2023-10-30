@@ -13,8 +13,7 @@ from ..registry import CustomObject
 @CustomObject
 class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
 
-    Components = TypedDict("Components", {"dnabert_encoder": DnaBertEncoderModel})
-    components: Components
+    dnabert_encoder: DnaBertEncoderModel
 
     def __init__(
         self,
@@ -28,7 +27,7 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         **kwargs
     ):
         super().__init__(**kwargs)
-        self.components["dnabert_encoder"] = dnabert_encoder
+        self.set_components(dnabert_encoder=dnabert_encoder)
         self.embed_dim = embed_dim
         self.max_set_len = max_set_len
         self.stack = stack
@@ -36,10 +35,6 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self.num_induce = num_induce
         self.pre_layernorm = pre_layernorm
         self.mha_layers = []
-
-    @property
-    def dnabert_encoder(self):
-        return self.components["dnabert_encoder"]
 
     def build_model(self):
         y = x = tf.keras.layers.Input((None, self.embed_dim))
