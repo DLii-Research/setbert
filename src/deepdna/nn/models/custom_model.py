@@ -1,5 +1,6 @@
 import abc
 import tensorflow as tf
+from pathlib import Path
 from typing import Any, Generic, TypeVar, TYPE_CHECKING
 from ..utils import GradientAccumulator, PostInit
 
@@ -102,6 +103,12 @@ class ModelWrapper(Generic[ModelType], metaclass=PostInit):
 
     def summary(self):
         return self.model.summary()
+
+    def save_internal_weights(self, path: str|Path):
+        return self.model.save_weights(path)
+
+    def load_internal_weights(self, path: str|Path):
+        return self.model.load_weights(path)
 
     def __setattr__(self, name, value):
         if name in ("inputs", "outputs", "input_names", "output_names"):

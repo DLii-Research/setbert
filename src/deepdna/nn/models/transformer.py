@@ -1,15 +1,18 @@
 import settransformer as st
 import tensorflow as tf
-from typing import Optional
+from typing import cast, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import keras
 
 from .custom_model import CustomModel, ModelWrapper
 from ..registry import CustomObject
 
-class AttentionScoreProvider:
+class AttentionScoreProvider(ModelWrapper):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.model: tf.keras.Model
-        self._model_with_att: tf.keras.Model|None = None
+        self.model: keras.Model
+        self._model_with_att: keras.Model|None = None
 
     def build_model_with_attention_scores(self):
         """
@@ -19,7 +22,7 @@ class AttentionScoreProvider:
         score_outputs = []
         for layer in self.model.layers[1:]:
             if isinstance(layer, AttentionScoreProvider):
-                y, scores = layer(y, return_attention_scores=True)
+                y, scores = layer(y, return_attention_scores=True) # type: ignore
                 score_outputs.append(scores)
             else:
                 y = layer(y)
@@ -31,8 +34,8 @@ class AttentionScoreProvider:
         If the model instance does not exist, build it.
         """
         if self._model_with_att is None:
-            self._model_with_att = self.build_model_with_attention_scores()
-        return self._model_with_att
+            self.set_components(_model_with_att=self.build_model_with_attention_scores())
+        return cast("keras.Model", self._model_with_att)
 
     def get_model(self, with_attention_scores: bool = False):
         """
@@ -100,7 +103,7 @@ class SetTransformerModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         y = x = self.input
         score_outputs = []
         for layer in self.model.layers[1:]:
-            y, scores = layer(y, return_attention_scores=True)
+            y, scores = layer(y, return_attention_scores=True) # type: ignore
             score_outputs.append(scores)
         return tf.keras.Model(x, (y, score_outputs))
 
