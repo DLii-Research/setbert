@@ -211,7 +211,7 @@ class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificat
 
     def __init__(self, base: ModelType, taxonomy_tokenizer: TopDownTaxonomyTokenizer, **kwargs):
         super().__init__(base, taxonomy_tokenizer, **kwargs)
-        self.set_component("_predictive_model", None)
+        self.set_components(_predictive_model=None)
 
     def build_model(self):
         gate_indices = []
@@ -246,7 +246,7 @@ class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificat
         if self._predictive_model is None:
             depth = self.taxonomy_tokenizer.depth
             outputs = [self.model.layers[3*i + 2].output for i in range(depth)]
-            self.set_component("_predictive_model", tf.keras.Model(self.input, outputs))
+            self.set_components(_predictive_model=tf.keras.Model(self.input, outputs))
         return cast(keras.Model, self._predictive_model)
 
     def predictions_to_labels(self, y_pred: tuple[tf.Tensor, ...]):
