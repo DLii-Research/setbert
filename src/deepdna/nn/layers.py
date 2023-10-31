@@ -265,15 +265,16 @@ class GumbelSoftmax(TypedLayer[[tf.Tensor, float], tuple[tf.Tensor, tf.Tensor]])
         """
 
         # Adds a sampled Gumbel distribution to the input
-        x = inputs + self.gumbel_distribution(tf.shape(inputs))
+        y = inputs + self.gumbel_distribution(tf.shape(inputs))
 
         # Applying the softmax over the Gumbel-based input
-        x = tf.nn.softmax(x / tau, self.axis)
+        y = tf.nn.softmax(y / tau, self.axis)
 
         # Sampling an argmax token from the Gumbel-based input
-        y = tf.stop_gradient(tf.argmax(x, self.axis, tf.int32))
+        y_hard = tf.one_hot(tf.argmax(y, axis=self.axis, output_type=tf.int32), depth=tf.shape(y)[self.axis])
+        y_hard = tf.stop_gradient(y_hard - y) + y
 
-        return cast(tuple[tf.Tensor, tf.Tensor], (x, y))
+        return cast(tuple[tf.Tensor, tf.Tensor], (y, y_hard))
 
     def get_config(self) -> dict[str, Any]:
         """
