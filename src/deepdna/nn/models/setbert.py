@@ -341,3 +341,9 @@ class SetBertSfdClassifierModel(ModelWrapper, CustomModel):
             f1_score,
             negative_predictive_value
         ]
+
+    def get_config(self):
+        return super().get_config() | {
+            "base": self.base,
+            "freeze_sequence_embeddings": self.freeze_sequence_embeddings
+        }
