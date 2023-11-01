@@ -247,7 +247,7 @@ class GumbelSoftmax(TypedLayer[[tf.Tensor, float], tuple[tf.Tensor, tf.Tensor]])
         """
 
         # Samples an uniform distribution based on the input shape
-        uniform_dist: tf.Tensor = tf.random.uniform(input_shape, 0, 1)
+        uniform_dist: tf.Tensor = tf.random.uniform(input_shape, 0.0, 1.0)
 
         # Samples from the Gumbel distribution
         gumbel_dist = -1 * tf.math.log(-1 * tf.math.log(uniform_dist + eps) + eps) # type: ignore
@@ -679,40 +679,67 @@ class ChunkedEmbeddingLayer(TypedLayer[[tf.Tensor], tf.Tensor]):
     def __init__(
         self,
         layer: tf.keras.layers.Layer|tf.keras.models.Model,
+        axis: int = -2,
         chunk_size: Optional[int] = None,
         stop_gradient: bool = False,
+        swap_memory: bool = False,
         **kwargs
     ):
         super().__init__(**kwargs)
         self.layer = layer
+        self.axis = axis
         self.chunk_size = chunk_size
         self.stop_gradient = stop_gradient
+        self.swap_memory = swap_memory
+
+    def _batch_predict(self, inputs, training: Optional[bool]):
+        i = tf.constant(self.chunk_size)
+        result = self.layer(inputs[:self.chunk_size], training=training)
+        i, result = tf.while_loop(
+            lambda i,_: i < tf.shape(inputs)[0],
+            lambda i,result: (
+                i + self.chunk_size,
+                tf.concat(
+                    (result, self.layer(inputs[i:i+self.chunk_size], training=training)),
+                    axis=0)),
+            loop_vars=[i, result],
+            parallel_iterations=1,
+            swap_memory=self.swap_memory)
+        return result
 
     def call(
         self,
         inputs: tf.Tensor,
         training: Optional[bool] = None,
     ) -> tf.Tensor:
-        original_shape = tf.shape(inputs)
-        inputs = tf.reshape(inputs, (-1, original_shape[-1]))
-        chunk_size = self.chunk_size
-        if chunk_size is None:
-            result = self.layer(inputs, training=training)
-            if self.stop_gradient:
-                result = tf.stop_gradient(result)
-        else:
-            result = subbatch_predict(
-                self.layer,
-                inputs,
-                chunk_size,
-                stop_gradient=self.stop_gradient)
-        return tf.reshape(result, tf.concat((original_shape[:-1], (-1,)), axis=0))
+        axis = self.axis
+        if axis < 0:
+            axis = tf.rank(inputs) + axis
+
+        # Flatten elements
+        input_shape = tf.shape(inputs)
+        left = input_shape[:axis+1]
+        right = input_shape[axis+1:]
+        inputs = tf.reshape(inputs, tf.concat(([-1], right), axis=0))
+
+        # Compute the embeddings
+        result = tf.cond(
+            self.chunk_size is None or tf.shape(inputs)[0] <= self.chunk_size,
+            lambda: self.layer(inputs, training=training),
+            lambda: self._batch_predict(inputs, training=training))
+        if self.stop_gradient:
+            result = tf.stop_gradient(result)
+
+        # Put back into shape
+        return tf.reshape(result, tf.concat((left, tf.shape(result)[1:]), axis=0))
 
     def get_config(self):
         return super().get_config() | {
             "layer": self.layer,
+            "axis": self.axis,
             "chunk_size": self.chunk_size,
-            "stop_gradient": self.stop_gradient
+            "stop_gradient": self.stop_gradient,
+            "swap_memory": self.swap_memory
         }
 
 # Set Generation -----------------------------------------------------------------------------------
