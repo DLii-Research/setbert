@@ -723,10 +723,13 @@ class ChunkedEmbeddingLayer(TypedLayer[[tf.Tensor], tf.Tensor]):
         inputs = tf.reshape(inputs, tf.concat(([-1], right), axis=0))
 
         # Compute the embeddings
-        result = tf.cond(
-            self.chunk_size is None or tf.shape(inputs)[0] <= self.chunk_size,
-            lambda: self.layer(inputs, training=training),
-            lambda: self._batch_predict(inputs, training=training))
+        if self.chunk_size is None:
+            result = self.layer(inputs, training=training)
+        else:
+            result = tf.cond(
+                tf.shape(inputs)[0] <= self.chunk_size,
+                lambda: self.layer(inputs, training=training),
+                lambda: self._batch_predict(inputs, training=training))
         if self.stop_gradient:
             result = tf.stop_gradient(result)
 
