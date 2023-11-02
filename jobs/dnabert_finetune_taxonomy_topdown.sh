@@ -1,7 +1,10 @@
 #!/bin/bash
 #SBATCH --signal=INT@600
 
-source "$(dirname -- "$( readlink -f -- "$0"; )")/../env.sh"
+if [ -z "${deepdna_env_loaded}" ]; then
+    echo "deepdna environment not loaded. Please run 'source env.sh' first."
+    exit 1
+fi
 
 ${python_prefix} ${python_tf} ./scripts/finetuning/dnabert_finetune_taxonomy_topdown.py \
     --wandb-name dnabert-taxonomy-topdown-silva-64d-150l \
