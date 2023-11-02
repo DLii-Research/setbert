@@ -6,7 +6,7 @@ if [ -z "${deepdna_env_loaded}" ]; then
     exit 1
 fi
 
-${python_prefix} ${python_tf} ./scripts/finetuning/setbert_finetune_hopland_br_classifier.py \
+${command_prefix} ${python_tf} ./scripts/finetuning/setbert_finetune_hopland_br_classifier.py \
     --wandb-name setbert-hopland-br-classifier-64d-150l \
     --wandb-project hopland \
     --setbert-pretrain-artifact $setbert_pretrain_initial \

@@ -6,7 +6,7 @@ if [ -z "${deepdna_env_loaded}" ]; then
     exit 1
 fi
 
-${python_prefix} ${python_tf} ./scripts/evaluation/setbert_evaluate_sfd_classifier.py \
+${command_prefix} ${python_tf} ./scripts/evaluation/setbert_evaluate_sfd_classifier.py \
     --pretrain-model-artifact $setbert_pretrain_sfd_128d_250l \
     --finetune-model-artifact $setbert_sfd_only_classifier_128d_250l \
     --sfd-dataset-path $datasets_path/SFD250 \

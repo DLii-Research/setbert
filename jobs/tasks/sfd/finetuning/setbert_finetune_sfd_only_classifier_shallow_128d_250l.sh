@@ -6,7 +6,7 @@ if [ -z "${deepdna_env_loaded}" ]; then
     exit 1
 fi
 
-${python_prefix} ${python_tf} ./scripts/finetuning/setbert_finetune_sfd_binary_classification.py \
+${command_prefix} ${python_tf} ./scripts/finetuning/setbert_finetune_sfd_binary_classification.py \
     --wandb-name setbert-sfd-only-classifier-128d-250l \
     --wandb-project sfd \
     --setbert-pretrain-artifact $setbert_pretrain_sfd_128d_250l \
