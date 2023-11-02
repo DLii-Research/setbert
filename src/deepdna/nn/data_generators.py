@@ -167,6 +167,13 @@ def encode_kmers(kmer: int, augment_ambiguous_bases: bool = False):
     return lambda encoded_sequences: dict(encoded_kmer_sequences=dna.encode_kmers(np.array(encoded_sequences), kmer, augment_ambiguous_bases))
 
 
+def taxonomy_indices(taxonomy_db: taxonomy.TaxonomyDb):
+    return lambda sequence_entries: dict(
+        taxonomy_indices=recursive_map(
+            lambda entry: taxonomy_db.fasta_id_to_index(entry.identifier),
+            sequence_entries))
+
+
 def taxonomy_labels(taxonomy_db: taxonomy.TaxonomyDb):
     return lambda sequence_entries: dict(
         taxonomy_labels=recursive_map(
