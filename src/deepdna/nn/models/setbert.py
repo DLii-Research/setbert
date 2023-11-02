@@ -364,3 +364,63 @@ class SetBertSfdClassifierModel(AttentionScoreProvider, ModelWrapper, CustomMode
             "base": self.base,
             "freeze_sequence_embeddings": self.freeze_sequence_embeddings
         }
+
+
+@CustomObject
+class SetBertHoplandBulkRhizosphereClassifierModel(AttentionScoreProvider, ModelWrapper, CustomModel):
+
+    base: SetBertEncoderModel
+
+    def __init__(self, base: SetBertModel, freeze_sequence_embeddings: bool, **kwargs):
+        super().__init__(**kwargs)
+        self.set_components(
+            base=SetBertEncoderModel(
+                base,
+                compute_sequence_embeddings=True,
+                stop_sequence_embedding_gradient=freeze_sequence_embeddings,
+                output_class=True,
+                output_sequences=False
+            ),
+            output_dense=tf.keras.layers.Dense(1, activation="sigmoid", name="bulk_rhizosphere"))
+        self.freeze_sequence_embeddings = freeze_sequence_embeddings
+
+    def build_model(self):
+        y = x = tf.keras.layers.Input(self.base.input_shape[1:])
+        y = embeddings = self.base(y)
+        y = self.output_dense(y)
+        return tf.keras.Model(x, (y, embeddings))
+
+    def build_model_with_attention_scores(self):
+        y = x = self.model.input
+        embeddings, scores = self.base(y, return_attention_scores=True)
+        output, scores = self.output_dense(embeddings)
+        return tf.keras.Model(x, (output, embeddings, scores))
+
+    def default_loss(self):
+        return [
+            tf.keras.losses.BinaryCrossentropy(from_logits=False),
+            None
+        ]
+
+    def default_metrics(self):
+        return {
+            "bulk_rhizosphere": [
+                tf.keras.metrics.BinaryAccuracy(),
+                tf.keras.metrics.Precision(),
+                tf.keras.metrics.Recall()
+            ]
+        }
+
+    @property
+    def chunk_size(self):
+        return self.base.chunk_size
+
+    @chunk_size.setter
+    def chunk_size(self, value):
+        self.base.chunk_size = value
+
+    def get_config(self):
+        return super().get_config() | {
+            "base": self.base,
+            "freeze_sequence_embeddings": self.freeze_sequence_embeddings
+        }
