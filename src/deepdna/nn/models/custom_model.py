@@ -120,6 +120,35 @@ class CustomModel(tf.keras.Model):
     """
     Custom Keras model with extended functionality.
     """
+
+    class CustomModelEventCallback(tf.keras.callbacks.Callback):
+        """
+        Forward the callback events to the CustomModel instance.
+        """
+        def set_model(self, model):
+            super().set_model(model)
+            methods = [
+                "on_batch_begin",
+                "on_batch_end",
+                "on_epoch_begin",
+                "on_epoch_end",
+                "on_predict_batch_begin",
+                "on_predict_batch_end",
+                "on_predict_begin",
+                "on_predict_end",
+                "on_test_batch_begin",
+                "on_test_batch_end",
+                "on_test_begin",
+                "on_test_end",
+                "on_train_batch_begin",
+                "on_train_batch_end",
+                "on_train_begin",
+                "on_train_end"
+            ]
+            no_op = lambda *_: None
+            for method in methods:
+                setattr(self, method, getattr(self.model, method, no_op))
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._accumulation_steps: int = 1
@@ -199,14 +228,17 @@ class CustomModel(tf.keras.Model):
             lambda: None)
         return {m.name: m.result() for m in self.metrics}
 
-    def fit(self, *args, accumulation_steps: int = 1, **kwargs):
+    def fit(self, *args, accumulation_steps: int = 1, callbacks=None, **kwargs):
         assert accumulation_steps > 0, "Accumulation steps cannot be less than 1."
         if accumulation_steps != self._accumulation_steps:
             self._accumulation_steps = accumulation_steps
             self.train_function = None
         if accumulation_steps > 1:
             self._gradient_accumulator = GradientAccumulator(self.trainable_weights)
-        history = super().fit(*args, **kwargs)
+        if callbacks is None:
+            callbacks = []
+        callbacks.append(CustomModel.CustomModelEventCallback())
+        history = super().fit(*args, callbacks=callbacks, **kwargs)
         del self._gradient_accumulator
         return history
 
