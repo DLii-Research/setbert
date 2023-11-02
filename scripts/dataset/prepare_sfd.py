@@ -71,7 +71,7 @@ def main(context: dcs.Context):
     taxonomy_map = {}
     for _, row in taxonomy_data.iterrows():
         otu, *taxons = tuple(row)
-        label = taxonomy.join_taxonomy(tuple(map(lambda t: "" if t.endswith("_unclassified") else t, taxons)))
+        label = taxonomy.join_taxonomy(taxons)
         taxonomy_map[otu] = label
     factory = taxonomy.TaxonomyDbFactory(output_path / f"{config.name}.tax.tsv.db")
     for entry in tqdm(fasta_db, desc="Writing taxonomy"):

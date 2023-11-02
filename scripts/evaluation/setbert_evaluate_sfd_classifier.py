@@ -40,16 +40,17 @@ def build_evaluation_model(context: dcs.Context):
     pretrain_base = load_model(wandb.artifact_argument_path("pretrain_model"), setbert.SetBertPretrainModel).base
 
     print("Loading fine-tuned model")
-    finetune_model = load_model(wandb.artifact_argument_path("finetune_model"), tf.keras.Model)
+    finetune_model = load_model(wandb.artifact_argument_path("finetune_model"), setbert.SetBertSfdClassifierModel)
 
     pretrain_encoder = setbert.SetBertEncoderModel(
         pretrain_base,
         compute_sequence_embeddings=True)
     finetune_encoder = setbert.SetBertEncoderModel(
-        finetune_model.layers[1].base,
+        finetune_model.model.layers[-2].base,
         compute_sequence_embeddings=True)
 
-    dense = finetune_model.layers[2]
+    dense = finetune_model.model.layers[-1]
+    assert isinstance(dense, tf.keras.layers.Dense)
     y = x = tf.keras.layers.Input(pretrain_encoder.input_shape[1:])
     pretrain_embeddings, pretrain_scores = pretrain_encoder(y, return_attention_scores=True)
     finetune_embeddings, finetune_scores = finetune_encoder(y, return_attention_scores=True)
