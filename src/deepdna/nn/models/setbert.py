@@ -19,11 +19,11 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self,
         dnabert_encoder: DnaBertEncoderModel,
         embed_dim: int,
-        max_set_len: int,
         stack: int,
         num_heads: int,
         num_induce: int|None = None,
         pre_layernorm: bool = True,
+        max_set_len: int|None = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -309,26 +309,35 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         return self.base.dnabert_encoder
 
 
-class SetBertSfdClassifierModel(ModelWrapper, CustomModel):
+@CustomObject
+class SetBertSfdClassifierModel(AttentionScoreProvider, ModelWrapper, CustomModel):
 
-    base: SetBertModel
+    base: SetBertEncoderModel
 
     def __init__(self, base: SetBertModel, freeze_sequence_embeddings: bool, **kwargs):
         super().__init__(**kwargs)
-        self.set_components(base=base)
+        self.set_components(
+            base=SetBertEncoderModel(
+                base,
+                compute_sequence_embeddings=True,
+                stop_sequence_embedding_gradient=freeze_sequence_embeddings,
+                output_class=True,
+                output_sequences=False
+            ),
+            output_dense=tf.keras.layers.Dense(1, activation="sigmoid", name="fungus_present"))
         self.freeze_sequence_embeddings = freeze_sequence_embeddings
 
     def build_model(self):
-        setbert_encoder = SetBertEncoderModel(
-            self.base,
-            compute_sequence_embeddings=True,
-            stop_sequence_embedding_gradient=self.freeze_sequence_embeddings,
-            output_class=True,
-            output_sequences=False)
-        y = x = tf.keras.layers.Input(setbert_encoder.input_shape[1:])
-        y = setbert_encoder(y)
-        y = tf.keras.layers.Dense(1, activation="sigmoid", name="fungus_present")(y)
+        y = x = tf.keras.layers.Input(self.base.input_shape[1:])
+        y = self.base(y)
+        y = self.output_dense(y)
         return tf.keras.Model(x, y)
+
+    def build_model_with_attention_scores(self):
+        y = x = self.model.input
+        y, scores = self.base(y, return_attention_scores=True)
+        output, scores = self.output_dense(y)
+        return tf.keras.Model(x, (output, scores))
 
     def default_loss(self):
         return tf.keras.losses.BinaryCrossentropy(from_logits=False)
@@ -341,6 +350,14 @@ class SetBertSfdClassifierModel(ModelWrapper, CustomModel):
             f1_score,
             negative_predictive_value
         ]
+
+    @property
+    def chunk_size(self):
+        return self.base.chunk_size
+
+    @chunk_size.setter
+    def chunk_size(self, value):
+        self.base.chunk_size = value
 
     def get_config(self):
         return super().get_config() | {
