@@ -370,6 +370,7 @@ class SetBertSfdClassifierModel(AttentionScoreProvider, ModelWrapper, CustomMode
         # Restore old architecture
         if isinstance(config["base"], SetBertEncoderModel):
             config["base"] = config["base"].base
+        return config
 
 
 @CustomObject
