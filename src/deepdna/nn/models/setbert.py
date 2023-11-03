@@ -365,6 +365,12 @@ class SetBertSfdClassifierModel(AttentionScoreProvider, ModelWrapper, CustomMode
             "freeze_sequence_embeddings": self.freeze_sequence_embeddings
         }
 
+    @classmethod
+    def from_config(self, config):
+        # Restore old architecture
+        if isinstance(config["base"], SetBertEncoderModel):
+            config["base"] = config["base"].base
+
 
 @CustomObject
 class SetBertHoplandBulkRhizosphereClassifierModel(AttentionScoreProvider, ModelWrapper, CustomModel):
