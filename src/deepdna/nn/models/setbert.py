@@ -366,11 +366,11 @@ class SetBertSfdClassifierModel(AttentionScoreProvider, ModelWrapper, CustomMode
         }
 
     @classmethod
-    def from_config(self, config):
+    def from_config(cls, config):
         # Restore old architecture
         if isinstance(config["base"], SetBertEncoderModel):
             config["base"] = config["base"].base
-        return config
+        return super().from_config(config)
 
 
 @CustomObject
