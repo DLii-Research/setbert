@@ -421,6 +421,6 @@ class SetBertHoplandBulkRhizosphereClassifierModel(AttentionScoreProvider, Model
 
     def get_config(self):
         return super().get_config() | {
-            "base": self.base,
+            "base": self.base.base,
             "freeze_sequence_embeddings": self.freeze_sequence_embeddings
         }
