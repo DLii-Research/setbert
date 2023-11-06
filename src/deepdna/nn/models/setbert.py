@@ -416,16 +416,37 @@ class SetBertHoplandBulkRhizosphereClassifierModel(AttentionScoreProvider, Model
         self.freeze_sequence_embeddings = freeze_sequence_embeddings
 
     def build_model(self):
-        y = x = tf.keras.layers.Input(self.base.input_shape[1:])
-        y = embeddings = self.base(y)
-        y = self.output_dense(y)
-        return tf.keras.Model(x, (y, embeddings))
+        return self._build_model(encoder=self.base, return_scores=False)
 
     def build_model_with_attention_scores(self):
-        y = x = self.model.input
-        embeddings, scores = self.base(y, return_attention_scores=True)
-        output = self.output_dense(embeddings)
-        return tf.keras.Model(x, (output, embeddings, scores))
+        return self._build_model(encoder=self.base, return_scores=True)
+
+    def _build_model(self, encoder, return_scores):
+        y = x = tf.keras.layers.Input(encoder.input_shape[1:])
+        y, scores = encoder(y, return_attention_scores=True)
+        y = self.output_dense(y)
+        y = (y, scores) if return_scores else y
+        return tf.keras.Model(x, y)
+
+    def make_attribution_model(self, chunk_size: int|None = None, integration_steps: int = 20):
+        encoder = SetBertEncoderModel(
+            self.base.base,
+            compute_sequence_embeddings=False,
+            output_class=True,
+            output_sequences=False)
+        y = x = tf.keras.layers.Input(self.base.input_shape[1:])
+        y = layers.ChunkedEmbeddingLayer(encoder.dnabert_encoder, chunk_size=chunk_size)(y)
+        sequence_encoder = tf.keras.Model(x, y)
+        sample_encoder = self._build_model(encoder, return_scores=True)
+        _compute_attention_attribution = attention_attribution.attention_attribution_factory(
+            sample_encoder,
+            next(find_layers(sample_encoder, SetTransformerModel)),
+            integration_steps=integration_steps)
+        @tf.function()
+        def compute_attention_attribution(inputs):
+            # return sequence_encoder(inputs)
+            return _compute_attention_attribution(sequence_encoder(inputs))
+        return compute_attention_attribution
 
     def default_loss(self):
         return [
