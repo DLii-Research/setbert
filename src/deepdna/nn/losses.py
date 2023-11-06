@@ -169,6 +169,17 @@ class GreedyEmd(tf.keras.losses.Loss):
 
 
 @CustomObject
+def taxonomy_relative_abundance_loss(y_true, y_pred):
+    y_true = tf.one_hot(y_true, depth=tf.shape(y_pred)[-1])
+    y_true = tf.reduce_sum(y_true, axis=-2)
+    y_true = y_true / tf.reduce_sum(y_true, keepdims=True, axis=-1)
+    # Compute abundance
+    y_pred = tf.reduce_sum(y_pred, axis=-2)
+    y_pred = y_pred / tf.reduce_sum(y_pred, keepdims=True, axis=-1)
+    return tf.keras.losses.kl_divergence(y_true, y_pred)
+
+
+@CustomObject
 class SparseCategoricalCrossentropyWithIgnoreClass(tf.keras.losses.SparseCategoricalCrossentropy):
     def __init__(
         self,
