@@ -1,11 +1,11 @@
-# import numpy as np
+import numpy as np
 from dnadb import taxonomy
 import tensorflow as tf
 from settransformer import custom_layers as __settransformer_layers
-from typing import Any, Callable, cast, Generic, Optional, ParamSpec, TypedDict, TypeVar
+from typing import Any, cast, Generic, Optional, ParamSpec, TypeVar
 
 from . registry import CustomObject, register_custom_objects
-from . utils import subbatch_predict, tfcast
+from . utils import tfcast
 
 # Set Transformer Layers
 register_custom_objects(__settransformer_layers())
@@ -225,16 +225,13 @@ class GumbelSoftmax(TypedLayer[[tf.Tensor, float], tuple[tf.Tensor, tf.Tensor]])
         Preprint arXiv:1611.01144 (2016).
     """
 
-    def __init__(self, axis=-1, **kwargs):
-        """
-        Initialization method.
-        Args:
-            axis (int): Axis to perform the softmax operation.
-        """
-
+    def __init__(self, axis: int = -1, **kwargs):
         super().__init__(**kwargs)
-
-        # Defining a property for holding the intended axis
+        self.temperature = tf.Variable(
+            1.0,
+            dtype=tf.float32,
+            name="Temperature",
+            trainable=False)
         self.axis = axis
 
     def gumbel_distribution(self, input_shape: tuple[int, ...], eps=1e-20):
@@ -254,7 +251,7 @@ class GumbelSoftmax(TypedLayer[[tf.Tensor, float], tuple[tf.Tensor, tf.Tensor]])
 
         return gumbel_dist
 
-    def call(self, inputs: tf.Tensor, tau: float) -> tuple[tf.Tensor, tf.Tensor]:
+    def call(self, inputs: tf.Tensor, temperature: Optional[float|tf.Tensor] = None) -> tuple[tf.Tensor, tf.Tensor]:
         """
         Method that holds vital information whenever this class is called.
         Args:
@@ -263,12 +260,13 @@ class GumbelSoftmax(TypedLayer[[tf.Tensor, float], tuple[tf.Tensor, tf.Tensor]])
         Returns:
             Gumbel-Softmax output and its argmax token.
         """
+        temperature = temperature if temperature is not None else self.temperature
 
         # Adds a sampled Gumbel distribution to the input
         y = inputs + self.gumbel_distribution(tf.shape(inputs))
 
         # Applying the softmax over the Gumbel-based input
-        y = tf.nn.softmax(y / tau, self.axis)
+        y = tf.nn.softmax(y / temperature, self.axis)
 
         # Sampling an argmax token from the Gumbel-based input
         y_hard = tf.one_hot(tf.argmax(y, axis=self.axis, output_type=tf.int32), depth=tf.shape(y)[self.axis])
@@ -289,53 +287,54 @@ class GumbelSoftmax(TypedLayer[[tf.Tensor, float], tuple[tf.Tensor, tf.Tensor]])
 # Multi-head Attention -----------------------------------------------------------------------------
 
 @CustomObject
-class VaswaniMultiHeadAttention(TypedLayer[[tf.Tensor, tf.Tensor, tf.Tensor|None], tf.Tensor]):
-    def __init__(self, embed_dim, num_heads):
-        super().__init__()
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        assert self.embed_dim % self.num_heads == 0, \
-            "Embed dim must be divisible by the number of heads"
+class AttributableMultiHeadAttention(tf.keras.layers.MultiHeadAttention):
+    """
+    An extended version of Keras' MultiHeadAttention layer to allow attention attribution.
+    """
+    def __init__(self, num_heads, key_dim, *args, **kwargs):
+        super().__init__(num_heads=num_heads, key_dim=key_dim, *args, **kwargs)
+        # Attention head weighting
+        self._alpha = tf.Variable(
+            [1.0]*num_heads,
+            dtype=tf.float32,
+            name="Alpha",
+            trainable=False)
 
-        self.fc_q = tf.keras.layers.Dense(embed_dim)
-        self.fc_k = tf.keras.layers.Dense(embed_dim)
-        self.fc_v = tf.keras.layers.Dense(embed_dim)
-        self.att = self.compute_multihead_attention
+    def reset_attention_attribution_weights(self):
+        self._alpha.assign([1.0]*self._num_heads)
 
-        self.supports_masking = True
+    def set_attention_attribution_weight(self, head, alpha):
+        self._alpha.scatter_nd_update([[head]], [alpha])
 
-    def compute_multihead_attention(self, q: tf.Tensor, k: tf.Tensor, v: tf.Tensor):
-        """
-        Compute multi-head attention in exactly the same manner
-        as the official implementation.
+    def set_attention_attribution_weights(self, heads, alphas):
+        self._alpha.scatter_nd_update(tf.reshape(heads, (-1, 1)), alphas)
 
-        Reference: https://github.com/juho-lee/set_transformer/blob/master/modules.py#L20-L33
-        """
-        q, k, v = self.fc_q(q), self.fc_k(k), self.fc_v(v) # type: ignore
+    def _compute_attention(self, query, key, value, attention_mask=None, training=None):
+        # Note: Applying scalar multiply at the smaller end of einsum improves
+        # XLA performance, but may introduce slight numeric differences in
+        # the Transformer attention head.
+        query = tf.multiply(query, 1.0 / np.sqrt(float(self._key_dim)))
 
-        # Divide for multi-head attention
-        q_split = tf.concat(tf.split(q, self.num_heads, 2), 0)
-        k_split = tf.concat(tf.split(k, self.num_heads, 2), 0)
-        v_split = tf.concat(tf.split(v, self.num_heads, 2), 0)
+        # Take the dot product between "query" and "key" to get the raw
+        # attention scores.
+        attention_scores = tf.einsum(self._dot_product_equation, key, query)
 
-        # Compute attention
-        att = tf.nn.softmax(
-            tf.matmul(q_split, k_split, transpose_b=True) / tf.sqrt(self.embed_dim), 2)
-        out = tf.concat(tf.split(tf.matmul(att, v_split), self.num_heads, 0), 2)
-        return out
+        attention_scores = self._masked_softmax(attention_scores, attention_mask)
 
-    def call(self, q: tf.Tensor, v: tf.Tensor, k:tf.Tensor|None = None, training = None):
-        if k is None:
-            k = v
-        return self.compute_multihead_attention(q, v, k)
+        # Multiply by alpha to allow pruning/attribution computation
+        attention_scores = tf.multiply(tf.reshape(self._alpha, (1, -1, 1, 1)), attention_scores)
 
-    def get_config(self):
-        config = super().get_config()
-        config.update({
-            "embed_dim": self.embed_dim,
-            "num_heads": self.num_heads
-        })
-        return config
+        # This is actually dropping out entire tokens to attend to, which might
+        # seem a bit unusual, but is taken from the original Transformer paper.
+        attention_scores_dropout = self._dropout_layer(attention_scores, training=training)
+
+        # `context_layer` = [B, T, N, H]
+        attention_output = tf.einsum(self._combine_equation, attention_scores_dropout, value)
+        return attention_output, attention_scores
+
+    @property
+    def num_heads(self):
+        return self._num_heads
 
 
 @CustomObject
