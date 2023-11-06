@@ -33,50 +33,50 @@ def find_mha_layers(model) -> list[tf.keras.layers.Layer]:
     return result
 
 
-def attention_attribution(
-    output_path: str|Path,
-    data_generator: Iterable[Any],
-    call: callable[Any, tf.Tensor],
-    mha_layers: Iterable[tf.keras.layers.Layer],
-    integration_steps=20
-) -> None:
-    """
-    Compute self-attention attribution.
+# def attention_attribution(
+#     output_path: str|Path,
+#     data_generator: Iterable[Any],
+#     call: callable[Any, tf.Tensor],
+#     mha_layers: Iterable[tf.keras.layers.Layer],
+#     integration_steps=20
+# ) -> None:
+#     """
+#     Compute self-attention attribution.
 
-    Arguments:
-      output_path: The output DB path to store the results.
-      data_generator: an iterable that returns a tuple containing metadata and the data.
-      call: a callable that accepts a data item as input, passing it through the model,
-            and returning the attention scores.
-      mha_layers: The MHA layers to monitor.
-      integration_steps: The number of integration approximation steps to perform.
-    """
-    mha_layers = tuple(mha_layers)
-    # Create the compute_attention_attribution function to gather attribution scores for each layer/head
-    if not hasattr(attention_attribution, "call") or id(attention_attribution.call) != id(call):
-        print("Compiling execution graph... This may take several minutes.")
-        attention_attribution.call = call
-        attention_attribution.compute_attention_attribution = _compute_attention_attribution_factory(call)
-    compute_attention_attribution = attention_attribution.compute_attention_attribution
+#     Arguments:
+#       output_path: The output DB path to store the results.
+#       data_generator: an iterable that returns a tuple containing metadata and the data.
+#       call: a callable that accepts a data item as input, passing it through the model,
+#             and returning the attention scores.
+#       mha_layers: The MHA layers to monitor.
+#       integration_steps: The number of integration approximation steps to perform.
+#     """
+#     mha_layers = tuple(mha_layers)
+#     # Create the compute_attention_attribution function to gather attribution scores for each layer/head
+#     if not hasattr(attention_attribution, "call") or id(attention_attribution.call) != id(call):
+#         print("Compiling execution graph... This may take several minutes.")
+#         attention_attribution.call = call
+#         attention_attribution.compute_attention_attribution = _compute_attention_attribution_factory(call)
+#     compute_attention_attribution = attention_attribution.compute_attention_attribution
 
-    store = Lmdb.open(output_path, "n")
+#     store = Lmdb.open(output_path, "n")
 
-    i = -1
-    for i, (metadata, x) in enumerate(data_generator):
-        print(f"\rComputing attention attribution: Step {i+1}", end="")
-        # Ensure token names have a corresponding ID
-        attrs = compute_attention_attribution(
-            tf.expand_dims(x, axis=0),
-            mha_layers,
-            integration_steps)[0]
+#     i = -1
+#     for i, (metadata, x) in enumerate(data_generator):
+#         print(f"\rComputing attention attribution: Step {i+1}", end="")
+#         # Ensure token names have a corresponding ID
+#         attrs = compute_attention_attribution(
+#             tf.expand_dims(x, axis=0),
+#             mha_layers,
+#             integration_steps)[0]
 
-        store[f"{i}_x"] = pickle.dumps(x)
-        store[f"{i}_metadata"] = pickle.dumps(metadata)
-        store[f"{i}_attr_shape"] = pickle.dumps(attrs.shape)
-        store[f"{i}_attrs"] = np.array(attrs).tobytes()
+#         store[f"{i}_x"] = pickle.dumps(x)
+#         store[f"{i}_metadata"] = pickle.dumps(metadata)
+#         store[f"{i}_attr_shape"] = pickle.dumps(attrs.shape)
+#         store[f"{i}_attrs"] = np.array(attrs).tobytes()
 
-    store["length"] = i + 1
-    store.close()
+#     store["length"] = i + 1
+#     store.close()
 
 
 def token_attribution(attribution_path: str|Path, metadata_key = lambda x: x, tau=0.4):
@@ -211,80 +211,26 @@ def _compute_token_attributions(attrs_by_layer):
     return attr_all
 
 
-def _compute_attention_attribution_factory(call):
-    if hasattr(call, "__iter__"):
-        # attention attribution shift
-        call_a, call_b = call
-        @tf.function
-        def compute_attention_attribution(x, mha_layers, integration_steps=20):
-            # Initialize attention attribution weights
-            for (layer_a, layer_b) in mha_layers:
-                layer_a.enable_attribution()
-                layer_b.enable_attribution()
-                layer_a._alpha.assign([1.0]*layer_a.num_heads)
-                layer_b._alpha.assign([1.0]*layer_b.num_heads)
-            # Get the gradient shapes using a single call
-            shapes = []
-            _, scores = call_a(x)
-            for layer_scores in scores: # [batch_index, head_index, n, n]
-                batch_size = tf.shape(layer_scores)[0]
-                n = tf.shape(layer_scores)[2]
-                shapes.append((batch_size, n, n))
-            # Compute attribution scores
-            attrs = []
-            for layer_index, (layer_a, layer_b) in enumerate(mha_layers):
-                attrs.append([])
-                for head in range(layer_a.num_heads):
-                    grad_sum_a = tf.zeros(shapes[layer_index])
-                    grad_sum_b = tf.zeros(shapes[layer_index])
-                    for alpha in tf.linspace(0.0, 1.0, integration_steps):
-                        layer_a.set_head_attribution_weight(head, alpha)
-                        layer_b.set_head_attribution_weight(head, alpha)
-                        with tf.GradientTape() as tape_a:
-                            y_pred_a, scores_a = call_a(x)
-                        with tf.GradientTape() as tape_b:
-                            y_pred_b, scores_b = call_b(x)
-                        grads_a = tape_a.gradient(y_pred_a, scores_a[layer_index])[:,head,:,:]
-                        grads_b = tape_b.gradient(y_pred_b, scores_b[layer_index])[:,head,:,:]
-                        grad_sum_a += grads_a
-                        grad_sum_b += grads_b
-                    attr_h_a = scores_a[layer_index][:,head,:,:]/integration_steps * grad_sum_a
-                    attr_h_b = scores_b[layer_index][:,head,:,:]/integration_steps * grad_sum_b
-                    attrs[-1].append(attr_h_b - attr_h_a)
-            attrs = tf.transpose(attrs, (2, 0, 1, 3, 4))
-            # attrs.shape == [sample_index, layer_index, head_index, n, n]
-            return attrs
-
-    else:
-        @tf.function
-        def compute_attention_attribution(x, mha_layers, integration_steps=20):
-            # Initialize attention attribution weights
-            for layer in mha_layers:
-                layer.enable_attribution()
-                layer._alpha.assign([1.0]*layer.num_heads)
-            # Get the gradient shapes using a single call
-            shapes = []
-            _, scores = call(x)
-            for layer_scores in scores: # [batch_index, head_index, n, n]
-                batch_size = tf.shape(layer_scores)[0]
-                n = tf.shape(layer_scores)[2]
-                shapes.append((batch_size, n, n))
-            # Compute attribution scores
-            attrs = []
-            for layer_index, layer in enumerate(mha_layers):
-                attrs.append([])
-                for head in range(layer.num_heads):
-                    grad_sum = tf.zeros(shapes[layer_index])
-                    for alpha in tf.linspace(0.0, 1.0, integration_steps):
-                        layer.set_head_attribution_weight(head, alpha)
-                        with tf.GradientTape() as tape:
-                            y_pred, scores = call(x)
-                        grads = tape.gradient(y_pred, scores[layer_index])[:,head,:,:]
-                        grad_sum += grads
-                    attr_h = scores[layer_index][:,head,:,:]/integration_steps * grad_sum
-                    attrs[-1].append(attr_h)
-            attrs = tf.transpose(attrs, (2, 0, 1, 3, 4))
-            # attrs.shape == [sample_index, layer_index, head_index, n, n]
-            return attrs
-
-    return compute_attention_attribution
+def attention_attribution_factory(call, transformer_stack, integration_steps: int = 20) -> Callable:
+    transformer_stack.set_attention_attribution_enabled(True)
+    @tf.function()
+    def compute_attention_attribution(inputs):
+        head_scores_shape = tf.shape(call(inputs)[1][0][:,0,:,:])
+        transformer_stack.reset_attention_attribution_weights()
+        result = tf.TensorArray(dtype=tf.float32, size=transformer_stack.num_heads*transformer_stack.stack, dynamic_size=False)
+        i = tf.constant(0)
+        for layer_index, mha_layer in enumerate(transformer_stack.mha_layers):
+            for head in tf.range(transformer_stack.num_heads):
+                grads = tf.zeros(head_scores_shape)
+                for alpha in tf.linspace(0.0, 1.0, integration_steps):
+                    mha_layer.set_attention_attribution_weight(head, alpha)
+                    y, scores = call(inputs)
+                    grads += tf.gradients([y], [scores[layer_index]], stop_gradients=[scores[layer_index]])[0][:,head,:,:]
+                result = result.write(i, grads)
+                i += 1
+        result = result.stack()
+        result = tf.reshape(
+            result,
+            tf.concat(((transformer_stack.stack, transformer_stack.num_heads), tf.shape(result)[1:]), axis=0))
+        return tf.transpose(result, (2, 0, 1, 3, 4))
+    return compute_attention_attribution # type: ignore

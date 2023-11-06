@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     import keras
 
 from .custom_model import CustomModel, ModelWrapper
+from ..layers import AttributableMultiHeadAttention
 from ..registry import CustomObject
 
 class AttentionScoreProvider(ModelWrapper):
@@ -72,6 +73,7 @@ class SetTransformerModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self.stack = stack
         self.pre_layernorm = pre_layernorm
         self.max_set_len = max_set_len
+        self.is_attention_attribution_enabled = False
 
     def build_model(self):
         self.model_with_att = None
@@ -107,6 +109,26 @@ class SetTransformerModel(AttentionScoreProvider, ModelWrapper, CustomModel):
             score_outputs.append(scores)
         return tf.keras.Model(x, (y, score_outputs))
 
+    def reset_attention_attribution_weights(self):
+        assert self.is_attention_attribution_enabled, "Attention attribution is not enabled."
+        for mha_layer in self.mha_layers:
+            mha_layer.reset_attention_attribution_weights()
+
+    def set_attention_attribution_enabled(self, enabled: bool):
+        if enabled:
+            AttentionLayer = AttributableMultiHeadAttention
+        else:
+            AttentionLayer = tf.keras.layers.MultiHeadAttention
+        old_mha_layers = self.mha_layers
+        for i in range(len(self)):
+            self.set_mha_layer(i, AttentionLayer.from_config(self.mha_layer(i).get_config()))
+        input_shape = tuple(s or 1 for s in self.input_shape)
+        self(tf.zeros(input_shape))
+        for l1, l2 in zip(self.mha_layers, old_mha_layers):
+            for w1, w2 in zip(l1.trainable_weights, l2.trainable_weights):
+                w1.assign(w2)
+        self.is_attention_attribution_enabled = True
+
     def __call__(
         self,
         inputs: tf.Tensor,
@@ -121,3 +143,36 @@ class SetTransformerModel(AttentionScoreProvider, ModelWrapper, CustomModel):
             training=training,
             return_attention_scores=return_attention_scores,
             **kwargs)
+
+    def __len__(self):
+        return self.stack
+
+    def __getitem__(self, index):
+        assert 0 <= index < (len(self.model.layers) - 1), "Index out of range."
+        return self.model.layers[index + 1]
+
+    @property
+    def mha_layers(self):
+        """
+        Get all the multi-head attention layers.
+        """
+        return [self.mha_layer(i) for i in range(len(self))]
+
+    def mha_layer(self, index):
+        """
+        Get the multi-head attention instance at the given index.
+        """
+        block = self[index]
+        if isinstance(block, st.InducedSetAttentionBlock):
+            return block.att2
+        return block.att
+
+    def set_mha_layer(self, index, layer):
+        """
+        Set the multi-head attention instance at the given index.
+        """
+        block = self[index]
+        if isinstance(block, st.InducedSetAttentionBlock):
+            block.att2 = layer
+        else:
+            block.att = layer
