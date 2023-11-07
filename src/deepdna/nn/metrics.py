@@ -78,7 +78,9 @@ def negative_predictive_value(y_true, y_pred):
 def taxonomy_relative_abundance_accuracy(y_true, y_pred):
     depth = tf.shape(y_pred)[-1]
     if tf.rank(y_true) != tf.rank(y_pred):
-        y_true = tf.one_hot(y_true, depth=depth)
+        y_true = tf.one_hot(tf.cast(y_true, tf.int64), depth=depth)
+    else:
+        y_true = tf.cast(y_true, tf.float32)
     total_abundance = tf.cast(tf.shape(y_pred)[-2], tf.float32)
     y_pred = tf.one_hot(tf.argmax(y_pred, axis=-1), depth)
     y_pred_correct = tf.math.minimum(y_true, y_pred)

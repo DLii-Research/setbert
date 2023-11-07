@@ -203,7 +203,9 @@ def taxonomy_relative_abundance_loss(y_true, y_pred):
     """
     if tf.rank(y_true) != tf.rank(y_pred):
         depth = tf.shape(y_pred)[-1]
-        y_true = tf.one_hot(y_true, depth=depth)
+        y_true = tf.one_hot(tf.cast(y_true, tf.int64), depth=depth)
+    else:
+        y_true = tf.cast(y_true, tf.float32)
     n = tf.cast(tf.shape(y_true)[-2], tf.float32) # total abundance
     y_true = tf.reduce_sum(y_true, axis=-2) / n
     y_pred = tf.reduce_sum(y_pred, axis=-2) / n
