@@ -197,13 +197,18 @@ class GreedyEmd(tf.keras.losses.Loss):
 
 @CustomObject
 def taxonomy_relative_abundance_loss(y_true, y_pred):
-    y_true = tf.one_hot(y_true, depth=tf.shape(y_pred)[-1])
-    y_true = tf.reduce_sum(y_true, axis=-2)
-    y_true = y_true / tf.reduce_sum(y_true, keepdims=True, axis=-1)
-    # Compute abundance
-    y_pred = tf.reduce_sum(y_pred, axis=-2)
-    y_pred = y_pred / tf.reduce_sum(y_pred, keepdims=True, axis=-1)
-    return tf.keras.losses.kl_divergence(y_true, y_pred)
+    """
+    Convert y_true and y_pred into relative taxonomy abundance distributions
+    and compare using categorical crossentropy.
+    """
+    if tf.rank(y_true) != tf.rank(y_pred):
+        depth = tf.shape(y_pred)[-1]
+        y_true = tf.one_hot(y_true, depth=depth)
+    n = tf.cast(tf.shape(y_true)[-2], tf.float32) # total abundance
+    y_true = tf.reduce_sum(y_true, axis=-2) / n
+    y_pred = tf.reduce_sum(y_pred, axis=-2) / n
+    minimum_entropy = tf.keras.losses.categorical_crossentropy(y_true, y_true)
+    return tf.keras.losses.categorical_crossentropy(y_true, y_pred) - minimum_entropy
 
 
 @CustomObject
