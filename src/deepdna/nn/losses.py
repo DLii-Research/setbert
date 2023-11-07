@@ -1,4 +1,5 @@
 from keras.utils import losses_utils
+from numba import njit
 import numpy as np
 from scipy.spatial.distance import cdist
 import tensorflow as tf
@@ -144,28 +145,54 @@ class GreedyEmd(tf.keras.losses.Loss):
         super().__init__(**kwargs)
         self.loss_fn = loss_fn
 
-    def _loss_np(self, y_true, y_pred):
-        sorted_indices = np.zeros(tf.shape(y_true)[:2]) # type: ignore
-        for batch_index, (a, b) in enumerate(zip(y_pred, y_true)):
-            visited_a, visited_b = set(), set()
-            distance = cdist(a, b).flatten()
-            indices = np.argsort(distance)
-            for i in indices:
-                from_index, to_index = i // 5, i % 5
-                if from_index in visited_a or to_index in visited_b:
+    def _greedy_emd_indices(self, n, indices):
+        result = np.empty((len(indices), n), np.int32)
+        for batch_index, ind in enumerate(indices):
+            visited_a = np.zeros(n, bool)
+            visited_b = np.zeros(n, bool)
+            found: int = 0
+            for index in ind:
+                i = index // n
+                j = index % n
+                if visited_a[i] or visited_b[j]:
                     continue
-                sorted_indices[batch_index][len(visited_a)] += from_index
-                visited_a.add(from_index)
-                visited_b.add(to_index)
-        return sorted_indices
+                visited_a[i] = visited_b[j] = True
+                result[batch_index,found] = index
+                found += 1
+                if found >= n:
+                    break
+        return result
 
     def call(self, y_true, y_pred, sample_weight=None):
-        indices = tf.py_function(self._loss_np, (y_true, y_pred), tf.int32)
-        y_pred = tf.gather(y_pred, indices, batch_dims=1)
-        try:
-            return self.loss_fn(y_true, y_pred, sample_weight)
-        except:
-            return self.loss_fn(y_true, y_pred)
+        # shape info
+        n = tf.shape(y_pred)[1]
+        depth = tf.shape(y_pred)[2]
+
+        # encode y_true
+        if tf.rank(y_true) != tf.rank(y_pred):
+            y_true = tf.cast(tf.one_hot(y_true, depth=depth), dtype=y_pred.dtype)
+        else:
+            y_true = tf.cast(y_true, dtype=y_pred.dtype)
+
+        # compute indices to compare
+        i_indices = tf.repeat(tf.range(n), n)
+        j_indices = tf.tile(tf.range(n), (n,))
+
+        # compute distances and sorted indices
+        distances = tf.linalg.norm(tf.gather(y_true, i_indices, axis=1) - tf.gather(y_pred, j_indices, axis=1), axis=-1)
+        indices = tf.argsort(distances, axis=1)
+
+        # Find the first mapping from B to A
+        indices = tf.numpy_function(self._greedy_emd_indices, (n, indices), [tf.int32], stateful=False)
+
+        y_true_indices = indices // n
+        y_pred_indices = indices % n
+
+        y_true = tf.gather(y_true, y_true_indices, axis=1, batch_dims=1)
+        y_pred = tf.gather(y_pred, y_pred_indices, axis=1, batch_dims=1)
+        if sample_weight is not None:
+            return self.loss_fn(y_true, y_pred, sample_weight=sample_weight)
+        return self.loss_fn(y_true, y_pred)
 
 
 @CustomObject
