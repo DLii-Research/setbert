@@ -611,62 +611,38 @@ class SplitClassToken(TypedLayer[[tf.Tensor], tuple[tf.Tensor, tf.Tensor]]):
         )
 
 
+@CustomObject
 class SetMask(tf.keras.layers.Layer):
-    def __init__(
-        self,
-        embed_dim: int,
-        max_set_len: int,
-        mask_ratio: float = 0.15,
-        use_keras_mask: bool = False,
-        **kwargs
-    ):
+    def __init__(self, embed_dim: int, set_size: int, mask_ratio: float, **kwargs):
         super().__init__(**kwargs)
         self.embed_dim = embed_dim
-        self.max_set_len = max_set_len
-        self.mask_ratio = tf.Variable(
-            mask_ratio,
-            trainable=False,
+        self.set_size = set_size
+        self.mask_ratio = mask_ratio
+        self.mask_embeddings = self.add_weight(
+            shape=(1, self.num_mask_tokens, self.embed_dim),
             dtype=tf.float32,
-            name="Mask_Ratio"
-        )
-        self.use_keras_mask = use_keras_mask
-        self.mask_tokens = self.add_weight(
-            shape=(1, tfcast(self.mask_ratio*self.max_set_len, tf.int32), self.embed_dim), # type: ignore
-            initializer="glorot_normal",
             trainable=True,
-            name="Mask_Tokens"
-        )
+            name="Mask_Embeddings")
 
-    def compute_mask(self, inputs, mask):
-        if not self.use_keras_mask:
-            return None
+    def call(self, inputs):
         batch_size = tf.shape(inputs)[0]
-        set_len = tf.shape(inputs)[1]
+        input_embeddings = inputs[:,:self.set_size-self.num_mask_tokens,:]
+        mask_embeddings = tf.tile(self.mask_embeddings, (batch_size, 1, 1))
+        return tf.concat((input_embeddings, mask_embeddings), axis=1)
 
-        m = tfcast(self.mask_ratio*tfcast(set_len, tf.float32), tf.int32)
-
-        zeros = tf.zeros((batch_size, m), dtype=tf.bool)
-        ones = tf.ones((batch_size, set_len - m), dtype=tf.bool)
-        return tf.concat((zeros, ones), axis=1)
-
-    def call(self, inputs, mask=None):
-        batch_size = tf.shape(inputs)[0]
-        set_len = tf.shape(inputs)[1]
-
-        m = tfcast(self.mask_ratio*tfcast(set_len, tf.float32), tf.int32)
-
-        masked_tokens = tf.tile(self.mask_tokens[:,:m,:], (batch_size, 1, 1))
-        unmasked_tokens = inputs[:,m:,:]
-
-        return m, tf.concat((masked_tokens, unmasked_tokens), axis=1)
+    def masked_embeddings(self, inputs):
+        return inputs[:,-self.num_mask_tokens:,:]
 
     def get_config(self):
         return super().get_config() | {
             "embed_dim": self.embed_dim,
-            "max_set_len": self.max_set_len,
-            "mask_ratio": self.mask_ratio.numpy(), # type: ignore
-            "use_keras_mask": self.use_keras_mask
+            "set_size": self.set_size,
+            "mask_ratio": self.mask_ratio
         }
+
+    @property
+    def num_mask_tokens(self):
+        return int(self.set_size*self.mask_ratio)
 
 # Time-distributed Layers --------------------------------------------------------------------------
 

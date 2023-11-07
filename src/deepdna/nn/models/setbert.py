@@ -197,6 +197,101 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
     @property
     def sequence_length(self):
         return self.base.dnabert_encoder.base.sequence_length
+    
+    
+@CustomObject
+class SetBertPretrainWithTaxaAbundanceModel(ModelWrapper, CustomModel):
+
+    base: SetBertModel
+    masking: layers.SetMask
+    embed_layer: layers.ChunkedEmbeddingLayer|None
+
+    def __init__(
+        self,
+        base: SetBertModel,
+        subsample_size: int,
+        num_labels: int,
+        mask_ratio: float = 0.15,
+        freeze_sequence_embeddings: bool = False,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.subsample_size = subsample_size
+        self.num_labels = num_labels
+        self.mask_ratio = mask_ratio
+        self.freeze_sequence_embeddings = freeze_sequence_embeddings
+        self.set_components(
+            base=base,
+            mask_layer=layers.SetMask(base.embed_dim, self.subsample_size, self.mask_ratio),
+            embed_layer=layers.ChunkedEmbeddingLayer(base.dnabert_encoder))
+
+    def build_model(self):
+        y = x = tf.keras.layers.Input((self.subsample_size-self.num_mask_tokens, self.base.dnabert_encoder.input_shape[-1]))
+        y = self.embed_layer(y)
+        y = self.mask_layer(y)
+        y = self.base(y)
+        y = self.mask_layer.masked_embeddings(y)
+        y = tf.keras.layers.Dense(self.num_labels, activation="softmax")(y)
+        return tf.keras.Model(x, y)
+
+    def default_loss(self):
+        return GreedyEmd()
+
+    def default_metrics(self):
+        return [taxonomy_relative_abundance_accuracy]
+
+    def get_config(self):
+        return super().get_config() | {
+            "base": self.base,
+            "subsample_size": self.subsample_size,
+            "num_labels": self.num_labels,
+            "mask_ratio": self.mask_ratio, # type: ignore
+            "freeze_sequence_embeddings": self.freeze_sequence_embeddings
+        }
+
+    def data_generator(
+        self,
+        samples,
+        batch_size: int,
+        batches_per_epoch: int,
+        shuffle: bool = True
+    ):
+        num_masked = self.num_mask_tokens
+        num_unmasked = self.subsample_size - num_masked
+        return dg.BatchGenerator(batch_size=batch_size, batches_per_epoch=batches_per_epoch, pipeline=[
+            dg.random_fasta_samples(samples),
+            dg.random_sequence_entries(subsample_size=num_masked),
+            dg.taxonomy_indices(tax_db),
+            dg.random_sequence_entries(subsample_size=num_unmasked),
+            dg.sequences(150),
+            dg.augment_ambiguous_bases,
+            dg.encode_sequences(),
+            dg.encode_kmers(3),
+            lambda encoded_kmer_sequences,taxonomy_indices: (
+                encoded_kmer_sequences,
+                np.array(taxonomy_indices))
+        ])
+
+    @property
+    def chunk_size(self):
+        return self.embed_layer.chunk_size if self.embed_layer is not None else None
+
+    @chunk_size.setter
+    def chunk_size(self, value):
+        assert self.embed_layer is not None
+        self.embed_layer.chunk_size = value
+
+    @property
+    def kmer(self):
+        return self.base.dnabert_encoder.base.kmer
+
+    @property
+    def sequence_length(self):
+        return self.base.dnabert_encoder.base.sequence_length
+
+    @property
+    def num_mask_tokens(self):
+        return int(self.subsample_size*self.mask_ratio)
 
 
 @CustomObject
