@@ -10,6 +10,7 @@ mkdir -p $silva_path
 
 function unpack_sequences_and_taxonomy() {
     artifact_prefix=$1
+    echo "${artifact_prefix}:"
     if [ ! -f "${silva_path}/${artifact_prefix}-seqs.fasta" ]; then
         echo "Unpacking DNA sequences..."
         ${command_prefix} conda run -n ${qiime2_env} qiime tools export \
@@ -26,8 +27,6 @@ function unpack_sequences_and_taxonomy() {
             --output-path "${silva_path}"
         mv "${silva_path}/taxonomy.tsv" "${silva_path}/${artifact_prefix}-tax.tsv"
     fi
-
-    # Convert FASTA to FASTA DB
 }
 
 # Raw NR99 Data ------------------------------------------------------------------------------------
