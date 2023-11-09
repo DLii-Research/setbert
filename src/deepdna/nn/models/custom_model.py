@@ -217,7 +217,6 @@ class CustomModel(tf.keras.Model):
             assert self.compiled_loss is not None
             loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
         grads = tape.gradient(loss, self.trainable_weights)
-        assert self.compiled_metrics is not None
         self.compiled_metrics.update_state(y, y_pred)
         # Accumulate the gradients
         self._gradient_accumulator.accumulate(grads)
@@ -239,7 +238,8 @@ class CustomModel(tf.keras.Model):
             callbacks = []
         callbacks.append(CustomModel.CustomModelEventCallback())
         history = super().fit(*args, callbacks=callbacks, **kwargs)
-        del self._gradient_accumulator
+        if getattr(self, "_gradient_accumulator", None) is not None:
+            del self._gradient_accumulator
         return history
 
     def __call__(self, *args, **kwargs) -> tf.Tensor:
