@@ -112,6 +112,7 @@ def main(context: dcs.Context):
             model.instance.sequence_length,
             model.instance.kmer)
         model.path("model").mkdir(exist_ok=True, parents=True)
+        model.instance(train_data[0][0])
         context.get(dcs.module.Train).fit(
             model.instance,
             train_data,
@@ -125,6 +126,7 @@ def main(context: dcs.Context):
     if config.log_artifact is not None:
         print("Logging artifact...")
         model.instance # Load the model to ensure it is in-tact
+        model._save()
         artifact = model.to_artifact(config.log_artifact)
         context.get(dcs.module.Wandb).log_artifact(artifact)
 
