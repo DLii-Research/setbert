@@ -8,7 +8,7 @@ source .env.example
 [ -f .env ] && source .env set
 
 # Load models
-source models.env
+source models.sh
 
 # Finish loading
 set +o allexport
