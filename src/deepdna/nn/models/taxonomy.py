@@ -23,7 +23,7 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[Mod
         self.taxonomy_tree = taxonomy_tree
 
     def default_loss(self):
-        return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+        return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, name="loss")
 
     def default_metrics(self):
         return [
@@ -102,11 +102,11 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel[ModelT
             outputs.append(gated_dense)
         return tf.keras.Model(x, outputs)
 
-    def default_loss(self):
-        return {
-            # Only supply loss to the deepest rank
-            taxonomy.RANKS[self.taxonomy_tree.depth-1].lower(): tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-        }
+    # def default_loss(self):
+        # return {
+        #     # Only supply loss to the deepest rank
+        #     taxonomy.RANKS[self.taxonomy_tree.depth-1].lower(): tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+        # }
 
     def _prediction_to_taxonomy(self, y_pred):
         return super()._prediction_to_taxonomy(y_pred[-1])
