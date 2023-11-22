@@ -1,9 +1,6 @@
 #!/bin/bash
 
-if [ -z "${deepdna_env_loaded}" ]; then
-    echo "deepdna environment not loaded. Please run 'source env.sh' first."
-    exit 1
-fi
+source env.sh
 
 silva_path="${data_path}/silva"
 mkdir -p $silva_path
@@ -78,3 +75,5 @@ if [ ! -f "${silva_path}/silva-${silva_version}-99-filtered-515-806-tax.qza" ]; 
 fi
 
 unpack_sequences_and_taxonomy "silva-${silva_version}-99-filtered-515-806"
+
+echo "Hopland, Nachusa, SFD, and Wetland are not available for download."
