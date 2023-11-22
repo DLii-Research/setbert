@@ -197,8 +197,8 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
     @property
     def sequence_length(self):
         return self.base.dnabert_encoder.base.sequence_length
-    
-    
+
+
 @CustomObject
 class SetBertPretrainWithTaxaAbundanceModel(ModelWrapper, CustomModel):
 
@@ -518,8 +518,9 @@ class SetBertHoplandBulkRhizosphereClassifierModel(AttentionScoreProvider, Model
 
     def _build_model(self, encoder, return_scores):
         y = x = tf.keras.layers.Input(encoder.input_shape[1:])
-        y, scores = encoder(y, return_attention_scores=True)
-        y = self.output_dense(y)
+        embedding, scores = encoder(y, return_attention_scores=True)
+        y = self.output_dense(embedding)
+        y = (y, embedding)
         y = (y, scores) if return_scores else y
         return tf.keras.Model(x, y)
 
@@ -536,7 +537,8 @@ class SetBertHoplandBulkRhizosphereClassifierModel(AttentionScoreProvider, Model
         _compute_attention_attribution = attention_attribution.attention_attribution_factory(
             sample_encoder,
             next(find_layers(sample_encoder, SetTransformerModel)),
-            integration_steps=integration_steps)
+            integration_steps=integration_steps,
+            y_for_gradient=lambda y: y[0]) # Use the classification output for differentation
         @tf.function()
         def compute_attention_attribution(inputs):
             # return sequence_encoder(inputs)
