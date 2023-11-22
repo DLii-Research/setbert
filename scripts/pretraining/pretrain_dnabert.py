@@ -1,5 +1,5 @@
 import argparse
-from dnadb import sample
+from dnadb import fasta
 import deepctx.scripting as dcs
 from deepctx.lazy import tensorflow as tf
 from pathlib import Path
@@ -58,13 +58,13 @@ def define_arguments(context: dcs.Context):
 
 
 def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int):
-    fasta_db = sample.load_fasta(config.sequences_fasta_db)
+    fasta_db = fasta.FastaDb(config.sequences_fasta_db)
     print(f"Found {len(fasta_db):,} sequences.")
     generator_pipeline = [
-        dg.random_fasta_samples([fasta_db]),
+        dg.random_samples(fasta_db),
         dg.random_sequence_entries(),
         dg.sequences(length=sequence_length),
-        dg.augment_ambiguous_bases,
+        dg.augment_ambiguous_bases(),
         dg.encode_sequences(),
         dg.encode_kmers(kmer),
         lambda encoded_kmer_sequences: (encoded_kmer_sequences,)*2
