@@ -7,6 +7,7 @@ import tensorflow as tf
 import time
 from typing import Any, Callable, Generic, Iterable, Literal, Optional, TypeVar
 
+from ..data import samplers
 from .utils import ndarray_from_iterable, recursive_map
 
 IOType = TypeVar("IOType")
@@ -236,7 +237,10 @@ def encode_kmers(kmer: int, augment_ambiguous_bases: bool = False):
     return lambda encoded_sequences: dict(encoded_kmer_sequences=dna.encode_kmers(np.array(encoded_sequences), kmer, augment_ambiguous_bases))
 
 
-def random_taxonomy_entries(taxonomy_db: taxonomy.TaxonomyDb, shape: Optional[int|tuple[int, ...]] = None):
+def random_taxonomy_entries(
+    taxonomy_db: taxonomy.TaxonomyDb|samplers.TaxonomyDbSampler,
+    shape: Optional[int|tuple[int, ...]] = None
+):
     """
     Retrieve random taxonomy entries from the given taxonomy database.
 
