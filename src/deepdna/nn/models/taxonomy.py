@@ -26,7 +26,11 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[Mod
         return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
     def default_metrics(self):
-        return tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")
+        return [
+            tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
+            tf.keras.metrics.Precision(name="precision"),
+            tf.keras.metrics.Recall(name="recall")
+        ]
 
     @abc.abstractmethod
     def _prediction_to_taxonomy(self, y_pred):
