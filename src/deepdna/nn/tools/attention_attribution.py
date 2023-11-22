@@ -13,7 +13,7 @@ import settransformer as st
 import tensorflow as tf
 import time
 from tqdm import tqdm, trange
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Optional
 
 
 def find_mha_layers(model) -> list[tf.keras.layers.Layer]:
@@ -211,26 +211,51 @@ def _compute_token_attributions(attrs_by_layer):
     return attr_all
 
 
-def attention_attribution_factory(call, transformer_stack, integration_steps: int = 20) -> Callable:
+def attention_attribution_factory(
+        call,
+        transformer_stack,
+        integration_steps: int = 20,
+        y_for_gradient: Optional[Callable] = None
+) -> Callable:
+    """
+    Parameters:
+        call: The model call function.
+        transformer_stack: The transformer stack to analyze.
+        integration_steps: The number of integration steps to perform.
+        return_prediction: Whether to return the prediction.
+        gradient_y: If call returns multiple predictions, specify which will be used for the gradient.
+    """
     transformer_stack.set_attention_attribution_enabled(True)
     @tf.function()
-    def compute_attention_attribution(inputs):
+    def compute_attention_attribution(*inputs, return_prediction=False):
         head_scores_shape = tf.shape(call(inputs)[1][0][:,0,:,:])
         transformer_stack.reset_attention_attribution_weights()
-        result = tf.TensorArray(dtype=tf.float32, size=transformer_stack.num_heads*transformer_stack.stack, dynamic_size=False)
+        attribution = tf.TensorArray(
+            dtype=tf.float32,
+            size=transformer_stack.num_heads*transformer_stack.stack,
+            dynamic_size=False)
         i = tf.constant(0)
         for layer_index, mha_layer in enumerate(transformer_stack.mha_layers):
             for head in tf.range(transformer_stack.num_heads):
                 grads = tf.zeros(head_scores_shape)
                 for alpha in tf.linspace(0.0, 1.0, integration_steps):
                     mha_layer.set_attention_attribution_weight(head, alpha)
-                    y, scores = call(inputs)
-                    grads += tf.gradients([y], [scores[layer_index]], stop_gradients=[scores[layer_index]])[0][:,head,:,:]
-                result = result.write(i, grads)
+                    prediction, scores = call(*inputs)
+                    y = y_for_gradient(prediction) if y_for_gradient is not None else prediction
+                    gradient = tf.gradients(
+                        [y],
+                        [scores[layer_index]],
+                        stop_gradients=[scores[layer_index]]
+                    )[0]
+                    grads += gradient[:,head,:,:]
+                attribution = attribution.write(i, scores[layer_index][:,head,:,:]*grads/float(integration_steps)) # type: ignore
                 i += 1
-        result = result.stack()
-        result = tf.reshape(
-            result,
-            tf.concat(((transformer_stack.stack, transformer_stack.num_heads), tf.shape(result)[1:]), axis=0))
-        return tf.transpose(result, (2, 0, 1, 3, 4))
+        attribution = attribution.stack()
+        attribution = tf.reshape(
+            attribution,
+            tf.concat(((transformer_stack.stack, transformer_stack.num_heads), tf.shape(attribution)[1:]), axis=0))
+        attribution = tf.transpose(attribution, (2, 0, 1, 3, 4))
+        if return_prediction:
+            return attribution, prediction # type: ignore
+        return attribution
     return compute_attention_attribution # type: ignore
