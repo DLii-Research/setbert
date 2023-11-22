@@ -166,6 +166,6 @@ if __name__ == "__main__":
     context.use(dcs.module.Rng)
     context.use(dcs.module.Wandb) \
         .resumeable() \
-        .defaults(project="dnabert-taxonomy")
+        .defaults(project="taxonomy-classification")
     define_arguments(context)
     context.execute()
