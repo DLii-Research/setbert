@@ -5,6 +5,7 @@ import tensorflow as tf
 from typing import Generic, TypeVar, TYPE_CHECKING
 
 from .custom_model import ModelWrapper, CustomModel
+from .. import metrics
 from ..registry import CustomObject
 from ..utils import ndarray_from_iterable, recursive_map
 
@@ -16,6 +17,7 @@ ModelType = TypeVar("ModelType", bound="keras.Model")
 class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelType]):
 
     base: ModelType
+    taxonomy_tree: taxonomy.TaxonomyTree
 
     def __init__(self, base: ModelType, taxonomy_tree: taxonomy.TaxonomyTree, **kwargs):
         super().__init__(**kwargs)
@@ -24,13 +26,6 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[Mod
 
     def default_loss(self):
         return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, name="loss")
-
-    def default_metrics(self):
-        return [
-            tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
-            tf.keras.metrics.Precision(name="precision"),
-            tf.keras.metrics.Recall(name="recall")
-        ]
 
     @abc.abstractmethod
     def _prediction_to_taxonomy(self, y_pred):
@@ -59,6 +54,14 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Model
         y = tf.keras.layers.Dense(len(self.taxonomy_tree))(y)
         return tf.keras.Model(x, y)
 
+    def default_metrics(self):
+        metric_list = []
+        for rank, name in enumerate(taxonomy.RANKS[:self.taxonomy_tree.depth]):
+            metric_list.append(metrics.TaxonomyRankAccuracy(self.taxonomy_tree, rank, name=f"{name.lower()}_accuracy"))
+            metric_list.append(metrics.TaxonomyRankPrecision(self.taxonomy_tree, rank, name=f"{name.lower()}_precision"))
+            metric_list.append(metrics.TaxonomyRankRecall(self.taxonomy_tree, rank, name=f"{name.lower()}_recall"))
+        return metric_list
+
     def _prediction_to_taxonomy(self, y_pred):
         y_pred = np.argmax(y_pred, axis=-1)
         return ndarray_from_iterable(recursive_map(lambda y: self.taxonomy_tree.taxonomy_id_map[-1][y], y_pred))
@@ -81,6 +84,16 @@ class BertaxTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Mode
             prev = tf.keras.layers.Concatenate()(in_help)
         return tf.keras.Model(x, outputs)
 
+    def default_metrics(self):
+        return {
+            name.lower(): [
+                tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
+                metrics.MulticlassPrecision(len(self.taxonomy_tree.id_to_taxon_map[rank]), name="precision"),
+                metrics.MulticlassRecall(len(self.taxonomy_tree.id_to_taxon_map[rank]), name="recall")
+            ]
+            for rank, name in enumerate(taxonomy.RANKS[:self.taxonomy_tree.depth])
+        }
+
     def _prediction_to_taxonomy(self, y_pred):
         y_pred = [np.argmax(rank_pred, axis=-1, keepdims=True) for rank_pred in y_pred]
         y_pred = np.concatenate(y_pred, axis=-1)
@@ -99,14 +112,19 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel[ModelT
             parent_logits = tf.gather(outputs[-1], [t.parent.taxonomy_id for t in taxonomies], axis=-1, name=f"{taxonomy.RANKS[rank].lower()}_logits")
             dense = tf.keras.layers.Dense(len(taxonomies), name=f"{taxonomy.RANKS[rank].lower()}_projection")(y)
             gated_dense = tf.keras.layers.Add(name=taxonomy.RANKS[rank].lower())((parent_logits, dense))
+            # gated_dense = tf.keras.layers.Add()((parent_logits, dense))
             outputs.append(gated_dense)
         return tf.keras.Model(x, outputs)
 
-    # def default_loss(self):
-        # return {
-        #     # Only supply loss to the deepest rank
-        #     taxonomy.RANKS[self.taxonomy_tree.depth-1].lower(): tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-        # }
+    def default_metrics(self):
+        return {
+            name.lower(): [
+                tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
+                metrics.MulticlassPrecision(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="precision"),
+                metrics.MulticlassRecall(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="recall")
+            ]
+            for rank, name in enumerate(taxonomy.RANKS[:self.taxonomy_tree.depth])
+        }
 
     def _prediction_to_taxonomy(self, y_pred):
         return super()._prediction_to_taxonomy(y_pred[-1])
