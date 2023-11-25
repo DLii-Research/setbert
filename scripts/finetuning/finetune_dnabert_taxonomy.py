@@ -75,11 +75,13 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
 
     # Construct the main pipeline
     pipeline = [
-        dg.sequence_entries_from_taxonomy(),
+        dg.random_samples(fasta_db),
+        dg.random_sequence_entries(),
         dg.sequences(length=sequence_length),
         dg.augment_ambiguous_bases(),
         dg.encode_sequences(),
-        dg.encode_kmers(kmer)
+        dg.encode_kmers(kmer),
+        dg.taxonomy_entries(tax_db)
     ]
 
     # Add the taxonomy output to the pipeline
@@ -96,8 +98,8 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
         ]
     elif ModelType == taxonomy_models.TopDownTaxonomyClassificationModel:
         pipeline += [
-            dg.taxonomy_ids(),
-            lambda encoded_kmer_sequences, taxonomy_ids: (encoded_kmer_sequences, tuple(taxonomy_ids.T))
+            dg.taxonomy_id(),
+            lambda encoded_kmer_sequences, taxonomy_id: (encoded_kmer_sequences, taxonomy_id)
         ]
     else:
         raise ValueError(f"Unknown model type: {repr(config.model_type)}")

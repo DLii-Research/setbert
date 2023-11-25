@@ -111,20 +111,21 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel[ModelT
         for rank, taxonomies in enumerate(self.taxonomy_tree.taxonomy_id_map[1:], start=1):
             parent_logits = tf.gather(outputs[-1], [t.parent.taxonomy_id for t in taxonomies], axis=-1, name=f"{taxonomy.RANKS[rank].lower()}_logits")
             dense = tf.keras.layers.Dense(len(taxonomies), name=f"{taxonomy.RANKS[rank].lower()}_projection")(y)
-            gated_dense = tf.keras.layers.Add(name=taxonomy.RANKS[rank].lower())((parent_logits, dense))
-            # gated_dense = tf.keras.layers.Add()((parent_logits, dense))
+            # gated_dense = tf.keras.layers.Add(name=taxonomy.RANKS[rank].lower())((parent_logits, dense))
+            gated_dense = tf.keras.layers.Add()((parent_logits, dense))
             outputs.append(gated_dense)
-        return tf.keras.Model(x, outputs)
+        return tf.keras.Model(x, outputs[-1])
 
     def default_metrics(self):
-        return {
-            name.lower(): [
-                tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
-                metrics.MulticlassPrecision(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="precision"),
-                metrics.MulticlassRecall(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="recall")
-            ]
-            for rank, name in enumerate(taxonomy.RANKS[:self.taxonomy_tree.depth])
-        }
+        return super().default_metrics()
+        # return {
+        #     name.lower(): [
+        #         tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
+        #         metrics.MulticlassPrecision(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="precision"),
+        #         metrics.MulticlassRecall(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="recall")
+        #     ]
+        #     for rank, name in enumerate(taxonomy.RANKS[:self.taxonomy_tree.depth])
+        # }
 
     def _prediction_to_taxonomy(self, y_pred):
         return super()._prediction_to_taxonomy(y_pred[-1])

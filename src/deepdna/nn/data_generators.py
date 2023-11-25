@@ -267,6 +267,18 @@ def sequence_entries_from_taxonomy():
     return lambda taxonomy_entries: dict(sequence_entries=np.array(recursive_map(lambda e: e.fasta_entry, taxonomy_entries)))
 
 
+def taxonomy_entries(taxonomy_db):
+    """
+    Retrieve the taxonomy entries corresponding to the given available sequence entries.
+
+    Inputs:
+        sequence_entries: list of sequence entries
+    Outputs:
+        taxonomy_entries: The taxonomy entries
+    """
+    return lambda sequence_entries: dict(taxonomy_entries=recursive_map(lambda e: taxonomy_db[e.identifier], sequence_entries))
+
+
 def taxon_ids():
     """
     Extract taxon integer IDs from the available taxonomy entries.
