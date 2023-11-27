@@ -27,7 +27,7 @@ fi
 # Train the model
 ${command_prefix} ${python_tf} ./scripts/pretraining/pretrain_dnabert.py \
     --wandb-name ${dataset_name}-64d-150bp \
-    --sequences-fasta-db "${datasets_path}/${dataset_dir}/${dataset_dir}.fasta.db" \
+    --sequences-fasta-db "${datasets_path}/${dataset_dir}/sequences.fasta.db" \
     ${@:2}
 
 # Remove data from scratch
