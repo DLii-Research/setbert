@@ -21,7 +21,7 @@ class PersistentDnaBertNaiveTaxonomyModel(
 ):
     def create(self, config: argparse.Namespace):
         # Load the tree from the database
-        with taxonomy.TaxonomyDb(config.taxonomy_db) as tax_db:
+        with taxonomy.TaxonomyDb(config.dataset_path / "taxonomy.tax.db") as tax_db:
             taxonomy_tree = tax_db.tree
         # Get the pre-trained DNABERT model
         wandb = self.context.get(dcs.module.Wandb)
@@ -54,9 +54,7 @@ class PersistentDnaBertNaiveTaxonomyModel(
 def define_arguments(context: dcs.Context):
     parser = context.argument_parser
     group = parser.add_argument_group("Dataset Settings")
-    group.add_argument("--sequences-fasta-db", type=Path, required=True, help="The path to the sequences FASTA DB.")
-    group.add_argument("--taxonomy-db", type=Path, required=True, help="The path to the taxonomy TSV DB.")
-    group.add_argument("--validation-split", type=float, default=None, help="The validation split to use")
+    group.add_argument("--dataset-path", type=Path, required=True, help="The path to the dataset.")
 
     group = parser.add_argument_group("Model Settings")
     group.add_argument("--model-type", type=str, required=True, choices=["bertax", "naive", "topdown"], help="The type of taxonomy model to use.")
@@ -70,58 +68,54 @@ def define_arguments(context: dcs.Context):
 
 
 def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int):
-    fasta_db = fasta.FastaDb(config.sequences_fasta_db)
-    tax_db = taxonomy.TaxonomyDb(config.taxonomy_db, fasta_db)
+    train_fasta_db = fasta.FastaDb(config.dataset_path / "sequences.fasta.db")
+    train_tax_db = taxonomy.TaxonomyDb(config.dataset_path / "taxonomy.tax.db", train_fasta_db)
+    val_fasta_db = fasta.FastaDb(config.dataset_path / "sequences.test.fasta.db")
+    val_tax_db = taxonomy.TaxonomyDb(config.dataset_path / "taxonomy.test.tax.db", val_fasta_db)
 
     # Construct the main pipeline
-    pipeline = [
-        dg.random_samples(fasta_db),
+    body_pipeline = [
+        # dg.random_samples(fasta_db),
         dg.random_sequence_entries(),
         dg.sequences(length=sequence_length),
         dg.augment_ambiguous_bases(),
         dg.encode_sequences(),
         dg.encode_kmers(kmer),
-        dg.taxonomy_entries(tax_db)
+        # dg.taxonomy_entries(tax_db)
     ]
 
     # Add the taxonomy output to the pipeline
     ModelType = MODEL_TYPES[config.model_type]
     if ModelType == taxonomy_models.BertaxTaxonomyClassificationModel:
-        pipeline += [
+        tail_pipeline = [
             dg.taxon_ids(),
             lambda encoded_kmer_sequences, taxon_ids: (encoded_kmer_sequences, tuple(taxon_ids.T))
         ]
     elif ModelType == taxonomy_models.NaiveTaxonomyClassificationModel:
-        pipeline += [
+        tail_pipeline = [
             dg.taxonomy_id(),
             lambda encoded_kmer_sequences, taxonomy_id: (encoded_kmer_sequences, taxonomy_id)
         ]
     elif ModelType == taxonomy_models.TopDownTaxonomyClassificationModel:
-        pipeline += [
+        tail_pipeline = [
             dg.taxonomy_id(),
             lambda encoded_kmer_sequences, taxonomy_id: (encoded_kmer_sequences, taxonomy_id)
         ]
     else:
         raise ValueError(f"Unknown model type: {repr(config.model_type)}")
 
-    train_sampler, val_sampler = tax_db, None
-    if config.validation_split is not None:
-        train_sampler, val_sampler = TaxonomyDbSampler.split(
-            tax_db,
-            [1.0-config.validation_split, config.validation_split],
-            rng=context.get(dcs.module.Rng).rng())
-
     train_data = dg.BatchGenerator(config.batch_size, config.steps_per_epoch, [
-        dg.random_taxonomy_entries(train_sampler),
-        *pipeline
+        dg.random_samples(train_fasta_db),
+        *body_pipeline,
+        dg.taxonomy_entries(train_tax_db),
+        *tail_pipeline
     ])
-
-    val_data = None
-    if val_sampler is not None:
-        val_data = dg.BatchGenerator(config.val_batch_size, config.val_steps_per_epoch, [
-            dg.random_taxonomy_entries(val_sampler),
-            *pipeline
-        ])
+    val_data = dg.BatchGenerator(config.val_batch_size, config.val_steps_per_epoch, [
+        dg.random_samples(val_fasta_db),
+        *body_pipeline,
+        dg.taxonomy_entries(val_tax_db),
+        *tail_pipeline
+    ])
 
     return (train_data, val_data)
 
@@ -163,6 +157,7 @@ if __name__ == "__main__":
         .defaults(
             epochs=None,
             batch_size=256,
+            val_batch_size=128,
             steps_per_epoch=100,
             val_steps_per_epoch=20)
     context.use(dcs.module.Rng)
