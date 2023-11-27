@@ -28,8 +28,7 @@ fi
 # Train the model
 ${command_prefix} ${python_tf} ./scripts/finetuning/finetune_dnabert_taxonomy.py \
     --wandb-name "${model_type}-${dataset_name}-64d-150bp" \
-    --sequences-fasta-db "${datasets_path}/${dataset_dir}/${dataset_dir}.fasta.db" \
-    --taxonomy-db "${datasets_path}/${dataset_dir}/${dataset_dir}.tax.db" \
+    --dataset-path "${datasets_path}/${dataset_dir}" \
     --dnabert-pretrain-artifact ${dnabert_pretrain_artifacts[${dataset_name}]} \
     --model-type ${model_type} \
     ${@:3}
