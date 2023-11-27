@@ -1,8 +1,8 @@
 # Silva Datasets
 declare -A datasets=(
-    [silva-nr99]=Silva_Nr99
-    [silva-nr99-filtered]=Silva_Nr99_Filtered
-    [silva-nr99-filtered-515f-806r]=Silva_Nr99_Filtered_515f_806r
+    [silva-nr99]=silva_nr99
+    [silva-nr99-filtered]=silva_nr99_filtered
+    [silva-nr99-filtered-515f-806r]=silva_nr99_filtered_515f_806r
 )
 
 # DNABERT
