@@ -1,5 +1,7 @@
+import numpy as np
+import numpy.typing as npt
 import tensorflow as tf
-from typing import Any, cast, TypeVar, Type
+from typing import Any, Callable, cast, TypeVar, Type
 
 TensorflowObject = TypeVar("TensorflowObject")
 
@@ -37,6 +39,26 @@ class PostInit(type):
                 original_init(self, *args, **kwargs)
         cls.__init__ = init
         super().__init__(name, bases, dct)
+
+
+def ndarray_from_iterable(elements) -> npt.NDArray[np.object_]:
+    arr = np.empty(len(elements), dtype=np.object_)
+    arr[:] = elements
+    return arr
+
+
+def recursive_map(
+    fn: Callable,
+    objs,
+    container_type = list
+) -> Any:
+    """
+    Apply a function recursively to a list of arguments using a for loop and a queue.
+    Store the result in a new list of the same shape.
+    """
+    if isinstance(objs, (list, tuple, np.ndarray)):
+        return container_type([recursive_map(fn, obj) for obj in objs])
+    return fn(objs)
 
 # Model/Layer Utilities ----------------------------------------------------------------------------
 
