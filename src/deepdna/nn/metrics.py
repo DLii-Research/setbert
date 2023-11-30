@@ -163,20 +163,81 @@ class SparseCategoricalAccuracyWithIgnoreClass(tf.keras.metrics.SparseCategorica
         return super().update_state(y_true, y_pred, sample_weight)
 
 
+class MinConfidenceMetricTrait(tf.keras.metrics.Metric):
+    def __init__(self, min_confidence: Optional[float] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.min_confidence = min_confidence
+
+    def filter_by_confidence(self, y_true, y_pred, sample_weight=None):
+        if self.min_confidence is not None:
+            indices = tf.squeeze(tf.where(tf.reduce_max(y_pred, axis=-1) >= self.min_confidence))
+            y_true = tf.gather(y_true, indices)
+            y_pred = tf.gather(y_pred, indices)
+        return y_true, y_pred, sample_weight
+
+    def get_config(self):
+        return super().get_config() | {
+            "min_confidence": self.min_confidence
+        }
+
+
 @CustomObject
-class MulticlassPrecision(tf.keras.metrics.Metric):
+class MulticlassAccuracy(MinConfidenceMetricTrait, tf.keras.metrics.Metric):
+    """
+    Multi-class accuracy metric with weighted averaging.
+    """
+    def __init__(self, num_classes: int, min_confidence: Optional[float] = None, **kwargs):
+        super().__init__(min_confidence=min_confidence, **kwargs)
+        self.num_classes = num_classes
+        self.class_observations = self.add_weight(shape=(self.num_classes,), name="class_observations", initializer="zeros")
+        self.true_positives = self.add_weight(shape=(self.num_classes,), name="true_positives", initializer="zeros")
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        y_true, y_pred, sample_weight = self.filter_by_confidence(y_true, y_pred, sample_weight)
+        if tf.rank(y_true) != tf.rank(y_pred):
+            y_pred = tf.argmax(y_pred, axis=-1)
+        else:
+            y_pred = tf.cast(y_pred, tf.int64)
+        y_true = tf.reshape(y_true, (-1,))
+        y_pred = tf.reshape(y_pred, (-1,))
+        y_true_one_hot = tf.one_hot(y_true, depth=self.num_classes)
+        y_pred_one_hot = tf.one_hot(y_pred, depth=self.num_classes)
+        true_positives = tf.reduce_sum(tf.cast(tf.math.logical_and(tf.cast(y_true_one_hot, tf.bool), tf.cast(y_pred_one_hot, tf.bool)), tf.float32), axis=0)
+        self.class_observations.assign_add(tf.reduce_sum(y_true_one_hot, axis=0))
+        self.true_positives.assign_add(true_positives)
+
+    def result(self):
+        total_observations = tf.reduce_sum(self.class_observations)
+        indices = tf.reshape(tf.where(self.class_observations > 0), (-1,))
+        true_positives = tf.gather(self.true_positives, indices)
+        observed_classes = tf.gather(self.class_observations, indices)
+        weights = tf.gather(self.class_observations, indices) / total_observations
+        return tf.reduce_sum(tf.math.divide_no_nan(true_positives, observed_classes)*weights)
+
+    def reset_state(self):
+        self.class_observations.assign(tf.zeros_like(self.class_observations))
+        self.true_positives.assign(tf.zeros_like(self.true_positives))
+
+    def get_config(self):
+        return super().get_config() | {
+            "num_classes": self.num_classes
+        }
+
+
+@CustomObject
+class MulticlassPrecision(MinConfidenceMetricTrait, tf.keras.metrics.Metric):
     """
     Multi-class precision metric with weighted averaging.
     """
-    def __init__(self, num_classes: int, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, num_classes: int, min_confidence: Optional[float] = None, **kwargs):
+        super().__init__(min_confidence=min_confidence, **kwargs)
         self.num_classes = num_classes
         self.class_observations = self.add_weight(shape=(self.num_classes,), name="class_observations", initializer="zeros")
         self.true_positives = self.add_weight(shape=(self.num_classes,), name="true_positives", initializer="zeros")
         self.false_positives = self.add_weight(shape=(self.num_classes,), name="false_positives", initializer="zeros")
 
     def update_state(self, y_true, y_pred, sample_weight=None):
-        y_true = tf.squeeze(y_true, axis=-1)
+        y_true, y_pred, sample_weight = self.filter_by_confidence(y_true, y_pred, sample_weight)
         if tf.rank(y_true) != tf.rank(y_pred):
             y_pred = tf.argmax(y_pred, axis=-1)
         else:
@@ -204,21 +265,26 @@ class MulticlassPrecision(tf.keras.metrics.Metric):
         self.true_positives.assign(tf.zeros_like(self.true_positives))
         self.false_positives.assign(tf.zeros_like(self.false_positives))
 
+    def get_config(self):
+        return super().get_config() | {
+            "num_classes": self.num_classes
+        }
+
 
 @CustomObject
-class MulticlassRecall(tf.keras.metrics.Metric):
+class MulticlassRecall(MinConfidenceMetricTrait, tf.keras.metrics.Metric):
     """
     Reduce the taxonomy ID to the given rank and compute recall.
     """
-    def __init__(self, num_classes: int, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, num_classes: int, min_confidence: Optional[float] = None, **kwargs):
+        super().__init__(min_confidence=min_confidence, **kwargs)
         self.num_classes = num_classes
         self.class_observations = self.add_weight(shape=(self.num_classes,), name="class_observations", initializer="zeros")
         self.true_positives = self.add_weight(shape=(self.num_classes,), name="true_positives", initializer="zeros")
         self.false_negatives = self.add_weight(shape=(self.num_classes,), name="false_negatives", initializer="zeros")
 
     def update_state(self, y_true, y_pred, sample_weight=None):
-        y_true = tf.squeeze(y_true, axis=-1)
+        y_true, y_pred, sample_weight = self.filter_by_confidence(y_true, y_pred, sample_weight)
         if tf.rank(y_true) != tf.rank(y_pred):
             y_pred = tf.argmax(y_pred, axis=-1)
         else:
@@ -246,37 +312,83 @@ class MulticlassRecall(tf.keras.metrics.Metric):
         self.true_positives.assign(tf.zeros_like(self.true_positives))
         self.false_negatives.assign(tf.zeros_like(self.false_negatives))
 
+    def get_config(self):
+        return super().get_config() | {
+            "num_classes": self.num_classes
+        }
+
 
 class TaxonomyRankMetric(tf.keras.metrics.Metric):
     """
     A base class for metrics that reduce the taxonomy ID to a given rank (0-indexed).
     """
-    def __init__(self, taxonomy_tree: taxonomy.TaxonomyTree, rank: int, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        taxonomy_tree: taxonomy.TaxonomyTree,
+        rank: int,
+        min_confidence: Optional[float] = None,
+        **kwargs
+    ):
+        super().__init__(min_confidence=min_confidence, **kwargs)
         self.taxonomy_tree = taxonomy_tree
         self.rank = rank
         self.taxonomy_id_to_truncated_taxonomy_id = tf.constant([
             taxon.truncate(rank).taxonomy_id for taxon in self.taxonomy_tree.taxonomy_id_map[-1]
         ], dtype=tf.int64)
+        self._parent_rank_indices = self._build_parent_rank_indices()
+
+    def _build_parent_rank_indices(self):
+        i = []
+        for t in self.taxonomy_tree.taxonomy_id_map[-1]:
+            if t.taxonomy_ids[self.rank] >= len(i):
+                i.append([])
+            i[-1].append(t.taxonomy_id)
+        return tf.ragged.constant(i)
 
     def _truncate_labels_and_predictions(self, y_true, y_pred):
-        y_true = tf.cast(y_true, tf.int64)
-        if tf.shape(y_pred)[-1] == len(self.taxonomy_tree.taxonomy_id_map[self.rank]):
-            return y_true, tf.argmax(y_pred, axis=-1)
+        y_true = tf.reshape(y_true, (-1,))
+        y_pred = tf.reshape(y_pred, (-1, len(self.taxonomy_tree.taxonomy_id_map[-1])))
+        # Sum the probabilities according to the desired parent rank
+        y_pred = tf.reduce_sum(tf.gather(y_pred, self._parent_rank_indices, batch_dims=0, axis=-1), axis=-1).to_tensor()
+        # Map y_true to the desired rank
         y_true = tf.gather(self.taxonomy_id_to_truncated_taxonomy_id, y_true)
-        y_pred = tf.gather(self.taxonomy_id_to_truncated_taxonomy_id, tf.argmax(y_pred, axis=-1))
         return y_true, y_pred
 
     def update_state(self, y_true, y_pred, sample_weight=None):
         y_true, y_pred = self._truncate_labels_and_predictions(y_true, y_pred)
         return super().update_state(y_true, y_pred, sample_weight=sample_weight)
 
+    def get_config(self):
+        return super().get_config() | {
+            "taxonomy_tree": self.taxonomy_tree.serialize().decode(),
+            "rank": self.rank
+        }
+
+    @classmethod
+    def from_config(cls, config):
+        config["taxonomy_tree"] = taxonomy.TaxonomyTree.deserialize(config["taxonomy_tree"])
+        del config["num_classes"]
+        return super().from_config(config)
+
 
 @CustomObject
-class TaxonomyRankAccuracy(TaxonomyRankMetric, tf.keras.metrics.Accuracy):
+class TaxonomyRankAccuracy(TaxonomyRankMetric, MulticlassAccuracy):
     """
-    Reduce the taxonomy ID to the given rank and compute accuracy.
+    Reduce the taxonomy ID to the given rank and compute multi-class accuracy.
     """
+    def __init__(
+        self,
+        taxonomy_tree: taxonomy.TaxonomyTree,
+        rank: int,
+        min_confidence: Optional[float] = None,
+        **kwargs
+    ):
+        super().__init__(
+            taxonomy_tree,
+            rank,
+            num_classes=len(taxonomy_tree.taxonomy_id_map[rank]),
+            min_confidence=min_confidence,
+            **kwargs)
 
 
 @CustomObject
@@ -284,8 +396,19 @@ class TaxonomyRankPrecision(TaxonomyRankMetric, MulticlassPrecision):
     """
     Reduce the taxonomy ID to the given rank and compute multi-class precision.
     """
-    def __init__(self, taxonomy_tree: taxonomy.TaxonomyTree, rank: int, **kwargs):
-        super().__init__(taxonomy_tree, rank, num_classes=len(taxonomy_tree.taxonomy_id_map[rank]), **kwargs)
+    def __init__(
+        self,
+        taxonomy_tree: taxonomy.TaxonomyTree,
+        rank: int,
+        min_confidence: Optional[float] = None,
+        **kwargs
+    ):
+        super().__init__(
+            taxonomy_tree,
+            rank,
+            num_classes=len(taxonomy_tree.taxonomy_id_map[rank]),
+            min_confidence=min_confidence,
+            **kwargs)
 
 
 @CustomObject
@@ -293,5 +416,16 @@ class TaxonomyRankRecall(TaxonomyRankMetric, MulticlassRecall):
     """
     Reduce the taxonomy ID to the given rank and compute recall.
     """
-    def __init__(self, taxonomy_tree: taxonomy.TaxonomyTree, rank: int, **kwargs):
-        super().__init__(taxonomy_tree, rank, num_classes=len(taxonomy_tree.taxonomy_id_map[rank]), **kwargs)
+    def __init__(
+        self,
+        taxonomy_tree: taxonomy.TaxonomyTree,
+        rank: int,
+        min_confidence: Optional[float] = None,
+        **kwargs
+    ):
+        super().__init__(
+            taxonomy_tree,
+            rank,
+            num_classes=len(taxonomy_tree.taxonomy_id_map[rank]),
+            min_confidence=min_confidence,
+            **kwargs)

@@ -25,7 +25,7 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[Mod
         self.taxonomy_tree = taxonomy_tree
 
     def default_loss(self):
-        return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, name="loss")
+        return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False, name="loss")
 
     @abc.abstractmethod
     def _prediction_to_taxonomy(self, y_pred):
@@ -51,15 +51,30 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Model
     def build_model(self):
         x = self.base.input
         y = self.base.output
-        y = tf.keras.layers.Dense(len(self.taxonomy_tree))(y)
+        y = tf.keras.layers.Dense(len(self.taxonomy_tree), activation="softmax")(y)
         return tf.keras.Model(x, y)
 
     def default_metrics(self):
         metric_list = []
         for rank, name in enumerate(taxonomy.RANKS[:self.taxonomy_tree.depth]):
-            metric_list.append(metrics.TaxonomyRankAccuracy(self.taxonomy_tree, rank, name=f"{name.lower()}_accuracy"))
-            metric_list.append(metrics.TaxonomyRankPrecision(self.taxonomy_tree, rank, name=f"{name.lower()}_precision"))
-            metric_list.append(metrics.TaxonomyRankRecall(self.taxonomy_tree, rank, name=f"{name.lower()}_recall"))
+            metric_list.append(
+                metrics.TaxonomyRankAccuracy(
+                    self.taxonomy_tree,
+                    rank,
+                    min_confidence=0.7,
+                    name=f"{name.lower()}_accuracy"))
+            metric_list.append(
+                metrics.TaxonomyRankPrecision(
+                    self.taxonomy_tree,
+                    rank,
+                    min_confidence=0.7,
+                    name=f"{name.lower()}_precision"))
+            # metric_list.append(
+            #     metrics.TaxonomyRankRecall(
+            #         self.taxonomy_tree,
+            #         rank,
+            #         min_confidence=0.7,
+            #         name=f"{name.lower()}_recall"))
         return metric_list
 
     def _prediction_to_taxonomy(self, y_pred):
@@ -82,14 +97,24 @@ class BertaxTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Mode
             in_help = outputs.copy()
             in_help.append(prev)
             prev = tf.keras.layers.Concatenate()(in_help)
+        outputs = list(map(tf.keras.layers.Activation(tf.nn.softmax), outputs))
         return tf.keras.Model(x, outputs)
 
     def default_metrics(self):
         return {
             name.lower(): [
-                tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
-                metrics.MulticlassPrecision(len(self.taxonomy_tree.id_to_taxon_map[rank]), name="precision"),
-                metrics.MulticlassRecall(len(self.taxonomy_tree.id_to_taxon_map[rank]), name="recall")
+                metrics.MulticlassAccuracy(
+                    len(self.taxonomy_tree.id_to_taxon_map[rank]),
+                    min_confidence=0.7,
+                    name="accuracy"),
+                metrics.MulticlassPrecision(
+                    len(self.taxonomy_tree.id_to_taxon_map[rank]),
+                    min_confidence=0.7,
+                    name="precision"),
+                # metrics.MulticlassRecall(
+                #     len(self.taxonomy_tree.id_to_taxon_map[rank]),
+                #     min_confidence=0.7,
+                #     name="recall")
             ]
             for rank, name in enumerate(taxonomy.RANKS[:self.taxonomy_tree.depth])
         }
@@ -114,7 +139,8 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel[ModelT
             # gated_dense = tf.keras.layers.Add(name=taxonomy.RANKS[rank].lower())((parent_logits, dense))
             gated_dense = tf.keras.layers.Add()((parent_logits, dense))
             outputs.append(gated_dense)
-        return tf.keras.Model(x, outputs[-1])
+        y = tf.keras.layers.Activation(tf.nn.softmax)(outputs[-1])
+        return tf.keras.Model(x, y)
 
     def default_metrics(self):
         return super().default_metrics()
@@ -128,4 +154,4 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel[ModelT
         # }
 
     def _prediction_to_taxonomy(self, y_pred):
-        return super()._prediction_to_taxonomy(y_pred[-1])
+        return super()._prediction_to_taxonomy(y_pred)
