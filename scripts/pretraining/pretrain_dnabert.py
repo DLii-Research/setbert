@@ -51,6 +51,8 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
     group.add_argument("--init-lr", type=float, default=0.0)
     group.add_argument("--warmup-steps", type=int, default=10000)
+    group.add_argument("--checkpoint-frequency", type=int, default=20, help="The number of epochs between checkpoints.")
+    group.add_argument("--val-frequency", type=int, default=20, help="The number of epochs between validation steps.")
 
     wandb = context.get(dcs.module.Wandb)
     group = wandb.argument_parser.add_argument_group("Logging")
@@ -102,7 +104,9 @@ def main(context: dcs.Context):
             train_data,
             validation_data=val_data,
             callbacks=[
-                tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
+                tf.keras.callbacks.ModelCheckpoint(
+                    filepath=str(model.path("model")),
+                    save_freq=config.checkpoint_frequency*config.steps_per_epoch),
                 LearningRateStepScheduler(
                     init_lr = config.init_lr,
                     max_lr=config.lr,
