@@ -91,13 +91,12 @@ class BertaxTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Mode
         outputs = []
         taxon_counts = [len(m) for m in self.taxonomy_tree.id_to_taxon_map]
         for i in range(self.taxonomy_tree.depth):
-            rank = taxonomy.RANKS[i].lower()
-            out = tf.keras.layers.Dense(taxon_counts[i], name=rank)(prev)
+            out = tf.keras.layers.Dense(taxon_counts[i])(prev)
             outputs.append(out)
             in_help = outputs.copy()
             in_help.append(prev)
             prev = tf.keras.layers.Concatenate()(in_help)
-        outputs = list(map(tf.keras.layers.Activation(tf.nn.softmax), outputs))
+        outputs = [tf.keras.layers.Activation(tf.nn.softmax, name=rank.lower())(out) for rank, out in zip(taxonomy.RANKS, outputs)]
         return tf.keras.Model(x, outputs)
 
     def default_metrics(self):

@@ -47,7 +47,7 @@ def main(context: dcs.Context):
                 continue
             out_fasta_db.write_entry(sequence_entry)
     sequences = fasta.FastaDb(config.output_path / "sequences.test.fasta.db")
-    with taxonomy.TaxonomyDbFactory(config.output_path / "taxonomy.test.tax.db", sequences, depth) as out_tax_db:
+    with taxonomy.TaxonomyDbFactory(config.output_path / "taxonomy.test.tax.db", sequences, depth, ref_tax_db.tree) as out_tax_db:
         for tax_entry in tqdm(taxonomy.entries(config.taxonomy_path), desc="Writing taxonomy..."):
             if not sequences.contains_sequence_id(tax_entry.sequence_id):
                 continue

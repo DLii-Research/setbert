@@ -36,7 +36,9 @@ class PersistentDnaBertNaiveTaxonomyModel(
             taxonomy_tree)
         print(model.__class__)
         model.summary()
-        model.compile(optimizer=tf.keras.optimizers.Adam(config.lr))
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(config.lr),
+            metrics=None if config.no_metrics else "default") # Remove metrics for speed-up
         return model
 
     def load(self):
@@ -59,6 +61,13 @@ def define_arguments(context: dcs.Context):
     group = parser.add_argument_group("Model Settings")
     group.add_argument("--model-type", type=str, required=True, choices=["bertax", "naive", "topdown"], help="The type of taxonomy model to use.")
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
+    group.add_argument("--no-metrics", action="store_true", help="Disable metrics for faster training.")
+
+    train = context.get(dcs.module.Train).train_argument_parser
+    train.add_argument("--checkpoint-frequency", type=int, default=20, help="The number of epochs between checkpoints.")
+
+    val = context.get(dcs.module.Train).validation_argument_parser
+    val.add_argument("--val-frequency", type=int, default=20, help="The number of epochs between validation steps.")
 
     wandb = context.get(dcs.module.Wandb)
     wandb.add_artifact_argument("dnabert-pretrain", required=True)
@@ -134,12 +143,16 @@ def main(context: dcs.Context):
             model.instance.base.sequence_length,
             model.instance.base.kmer)
         model.path("model").mkdir(exist_ok=True, parents=True)
+        print("Checkpoint frequency", config.checkpoint_frequency)
         context.get(dcs.module.Train).fit(
             model.instance,
             train_data,
             validation_data=val_data,
+            validation_freq=config.val_frequency,
             callbacks=[
-                tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model")))
+                tf.keras.callbacks.ModelCheckpoint(
+                    filepath=str(model.path("model")),
+                    save_freq=config.checkpoint_frequency*config.steps_per_epoch)
             ])
 
     # Artifact logging
