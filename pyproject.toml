@@ -1,5 +1,5 @@
 [project]
-name = "deepdna"
+name = "deep-dna"
 version = "0.0.1"
 authors = [
   { name="David W. Ludwig II", email="davidludwigii@gmail.com" }
@@ -16,7 +16,7 @@ dependencies = [
   "tensorflow >= 2.9.0",
   "tf-settransformer >= 0.2.5",
   "tf-utilities >= 0.1.8",
-  "wandb <= 0.15.10"
+  "wandb >= 0.14.0"
 ]
 
 [project.urls]
