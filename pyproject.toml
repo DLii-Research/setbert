@@ -7,13 +7,13 @@ authors = [
 description = "Deep learning models for handling DNA sequences and high-throughput sequencing samples."
 readme = "README.md"
 license = { file="LICENSE" }
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 dependencies = [
   "deepctx <= 0.0.19",
   "dnadb <= 0.13.3",
   "lmdbm-lockable >= 0.0.5",
   "numba >= 0.55.2",
-  "tensorflow >= 2.9.0",
+  "tensorflow >= 2.9.0 < 2.10.0",
   "tf-settransformer >= 0.2.5",
   "tf-utilities >= 0.1.8",
   "wandb >= 0.14.0"
