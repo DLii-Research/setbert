@@ -1,6 +1,6 @@
 import settransformer as st
 import tensorflow as tf
-from typing import cast, Optional, TYPE_CHECKING
+from typing import cast, List, Optional, Tuple, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     import keras
@@ -13,7 +13,7 @@ class AttentionScoreProvider(ModelWrapper):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model: keras.Model
-        self._model_with_att: keras.Model|None = None
+        self._model_with_att: Optional[keras.Model] = None
 
     def build_model_with_attention_scores(self):
         """
@@ -60,7 +60,7 @@ class SetTransformerModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self,
         embed_dim: int,
         num_heads: int,
-        num_induce: int|None = None,
+        num_induce: Optional[int] = None,
         stack: int = 1,
         pre_layernorm: bool = True,
         max_set_len: Optional[int] = None,
@@ -136,7 +136,7 @@ class SetTransformerModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         training: Optional[bool] = None,
         return_attention_scores: bool = False,
         **kwargs
-    ) -> tf.Tensor | tuple[tf.Tensor, list[tf.Tensor]]:
+    ) -> Union[tf.Tensor, Tuple[tf.Tensor, List[tf.Tensor]]]:
         return super().__call__(
             inputs,
             *args,

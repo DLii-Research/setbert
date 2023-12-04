@@ -5,7 +5,7 @@ import numpy.typing as npt
 import re
 import tensorflow as tf
 import time
-from typing import Any, Callable, Generic, Iterable, Literal, Optional, TypeVar
+from typing import Any, Callable, Dict, Generic, Iterable, List, Literal, Optional, Tuple, TypeVar, Union
 
 from ..data import samplers
 from .utils import ndarray_from_iterable, recursive_map
@@ -16,7 +16,7 @@ class BatchGenerator(tf.keras.utils.Sequence, Generic[IOType]):
         self,
         batch_size: int,
         batches_per_epoch: int,
-        pipeline: list[Callable[..., dict[str, Any]|Any]],
+        pipeline: List[Callable[..., Union[Dict[str, Any], Any]]],
         shuffle: bool = True,
         rng: Optional[np.random.Generator] = None
     ):
@@ -63,7 +63,7 @@ class BatchGenerator(tf.keras.utils.Sequence, Generic[IOType]):
         """
         t = time.time()
         seed = self.__batch_seeds[batch_index]
-        store: dict[str, Any] = {}
+        store: Dict[str, Any] = {}
         output: Any = dict(
             batch_size=self.batch_size,
             np_rng=np.random.Generator(np.random.PCG64(seed)),
@@ -80,9 +80,9 @@ class BatchGenerator(tf.keras.utils.Sequence, Generic[IOType]):
 
 
 def random_samples(
-    samples: sample.ISample|Iterable[sample.ISample],
-    shape: Optional[int|tuple[int, ...]] = None,
-    weights: npt.NDArray[np.float_]|Literal["sample_size"]|None = None,
+    samples: Union[sample.ISample, Iterable[sample.ISample]],
+    shape: Optional[Union[int, Tuple[int, ...]]] = None,
+    weights: Union[npt.NDArray[np.float_], Literal["sample_size"], None] = None,
 ):
     """
     Draw random samples from the given list of samples with replacement.
@@ -117,7 +117,7 @@ def random_samples(
 
 
 def random_sequence_entries(
-    subsample_size: int|tuple[int, int]|None = None,
+    subsample_size: Optional[Union[int, Tuple[int, int]]] = None,
 ):
     """
     Retrieve random sequence entries from the available samples.
@@ -144,7 +144,7 @@ def random_sequence_entries(
 
 
 def sequences(
-    length: Optional[int|tuple[int, int]] = None
+    length: Optional[Union[int, Tuple[int, int]]] = None
 ):
     """
     Retrieve the DNA sequence strings from the available sequence entries.
@@ -238,8 +238,8 @@ def encode_kmers(kmer: int, augment_ambiguous_bases: bool = False):
 
 
 def random_taxonomy_entries(
-    taxonomy_db: taxonomy.TaxonomyDb|samplers.TaxonomyDbSampler,
-    shape: Optional[int|tuple[int, ...]] = None
+    taxonomy_db: Union[taxonomy.TaxonomyDb, samplers.TaxonomyDbSampler],
+    shape: Optional[Union[int, Tuple[int, ...]]] = None
 ):
     """
     Retrieve random taxonomy entries from the given taxonomy database.

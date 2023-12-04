@@ -1,7 +1,9 @@
 import abc
 from dnadb import taxonomy
 import numpy as np
+from scipy.special import softmax
 import tensorflow as tf
+from tqdm import tqdm
 from typing import Generic, TypeVar, TYPE_CHECKING
 
 from .custom_model import ModelWrapper, CustomModel
@@ -28,14 +30,15 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[Mod
         return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False, name="loss")
 
     @abc.abstractmethod
-    def _prediction_to_taxonomy(self, y_pred):
+    def _prediction_to_taxonomy(self, y_pred, confidence: float):
         raise NotImplementedError()
 
-    def predict(self, *args, **kwargs):
-        return self._prediction_to_taxonomy(super().predict(*args, **kwargs))
+    def predict(self, *args, confidence: float = 0.7, **kwargs):
+        return self._prediction_to_taxonomy(super().predict(*args, **kwargs), confidence)
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "base": self.base,
             "taxonomy_tree": self.taxonomy_tree.serialize().decode()
         }
@@ -77,9 +80,92 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Model
             #         name=f"{name.lower()}_recall"))
         return metric_list
 
-    def _prediction_to_taxonomy(self, y_pred):
-        y_pred = np.argmax(y_pred, axis=-1)
-        return ndarray_from_iterable(recursive_map(lambda y: self.taxonomy_tree.taxonomy_id_map[-1][y], y_pred))
+    def _build_parent_rank_indices(self):
+        if hasattr(self, "_parent_rank_indices"):
+            return self._parent_rank_indices
+        self._parent_rank_indices = {}
+        for rank in range(0, self.taxonomy_tree.depth - 1):
+            i = []
+            for t in self.taxonomy_tree.taxonomy_id_map[rank+1]:
+                if t.taxonomy_ids[rank] >= len(i):
+                    i.append([])
+                i[-1].append(t.taxonomy_id)
+            self._parent_rank_indices[rank] = tf.ragged.constant(i)
+        return self._parent_rank_indices
+
+    # @tf.function
+    # def _compute_rank_predictions(self, y_pred) -> tuple[tf.Tensor, tf.Tensor]:
+    #     # Predict taxonomy ID for each rank given y_pred=genus, along with confidence
+    #     parent_rank_indices = self._build_parent_rank_indices()
+    #     labels = [tf.argmax(y_pred, axis=-1)]
+    #     confidence = [tf.gather(y_pred, labels[-1], batch_dims=1, axis=-1)]
+    #     for rank in range(len(parent_rank_indices)-1, -1, -1):
+    #         y_pred = tf.reduce_sum(tf.gather(y_pred, parent_rank_indices[rank], batch_dims=0, axis=-1), axis=-1).to_tensor()
+    #         labels.append(tf.argmax(y_pred, axis=-1))
+    #         confidence.append(tf.gather(y_pred, labels[-1], batch_dims=1, axis=-1))
+    #     return tf.stack(labels[::-1], axis=1), tf.stack(confidence[::-1], axis=1)
+
+    # @tf.function
+    # def predict_batch(self, x):
+    #     return self.predict_step(x)
+
+    def predict_step(self, x):
+        parent_rank_indices = self._build_parent_rank_indices()
+        y_pred = self(x, training=False)
+        outputs = (y_pred,)
+        # labels = [tf.argmax(y_pred, axis=-1)]
+        # confidence = [tf.gather(y_pred, labels[-1], batch_dims=1, axis=-1)]
+        for rank in range(len(parent_rank_indices)-1, -1, -1):
+            y_pred = tf.reduce_sum(tf.gather(y_pred, parent_rank_indices[rank], batch_dims=0, axis=-1), axis=-1).to_tensor()
+            outputs = (y_pred,) + outputs
+            # labels.append(tf.argmax(y_pred, axis=-1))
+            # confidence.append(tf.gather(y_pred, labels[-1], batch_dims=1, axis=-1))
+        # labels, confidence = tf.stack(labels[::-1], axis=1), tf.stack(confidence[::-1], axis=1)
+        # return labels, confidence
+        return outputs
+
+    def _prediction_to_taxonomy(self, y_pred, confidence_threshold: float):
+        output_shape = y_pred[0].shape[:-1]
+        y_pred = tuple(map(lambda y: tf.reshape(y, (-1, y.shape[-1])), y_pred))
+        result = []
+        confidences = []
+        for y in zip(*y_pred):
+            rank = len(y) - 1
+            i = np.argmax(y[rank])
+            while rank > 0 and y[rank][i] < confidence_threshold:
+                rank -= 1
+                i = np.argmax(y[rank])
+            result.append(self.taxonomy_tree.taxonomy_id_map[rank][i])
+            confidences.append(y[rank][i])
+        return (
+            ndarray_from_iterable(result).reshape(output_shape),
+            np.array(confidences).reshape(output_shape))
+        # output_shape = y_pred[0].shape[:-1]
+        # y_pred = tuple(map(lambda y: tf.reshape(y, (-1, y.shape[-1])), y_pred))
+        # result = []
+        # confidences = []
+        # for y in zip(*y_pred):
+        #     taxon = self.taxonomy_tree.taxonomy_id_map[0][np.argmax(y[0])]
+        #     rank = 0
+        #     confidence = np.max(y[0])
+        #     total_confidence = confidence
+        #     while confidence >= confidence_threshold and rank < self.taxonomy_tree.depth - 1:
+        #         rank += 1
+        #         # If a call is made, we can re-weight the children.
+        #         start_id = next(iter(taxon.children.values())).taxonomy_id
+        #         end_id = len(taxon.children) + start_id
+        #         reweighted = softmax(np.log(y[rank][start_id:end_id+1]))
+        #         i = np.argmax(reweighted)
+        #         confidence = reweighted[i]
+        #         total_confidence *= confidence
+        #         if confidence >= confidence_threshold:
+        #             taxon = self.taxonomy_tree.taxonomy_id_map[rank][i + start_id]
+        #     result.append(taxon)
+        #     confidences.append(total_confidence)
+        # return (ndarray_from_iterable(result).reshape(output_shape), np.array(confidences).reshape(output_shape))
+        # labels, confidence = self._compute_rank_predictions(y_pred)
+        # print(labels)
+        # return labels
 
 
 @CustomObject
@@ -151,6 +237,3 @@ class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel[ModelT
         #     ]
         #     for rank, name in enumerate(taxonomy.RANKS[:self.taxonomy_tree.depth])
         # }
-
-    def _prediction_to_taxonomy(self, y_pred):
-        return super()._prediction_to_taxonomy(y_pred)

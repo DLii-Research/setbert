@@ -1,6 +1,6 @@
-from typing import Any
+from typing import Any, Dict
 
-__custom_objects: dict[str, Any] = {}
+__custom_objects: Dict[str, Any] = {}
 
 def custom_objects():
     """
@@ -14,7 +14,7 @@ def register_custom_object(name: str, obj: Any):
     """
     __custom_objects[name] = obj
 
-def register_custom_objects(objs: dict[str, Any]):
+def register_custom_objects(objs: Dict[str, Any]):
     """
     Register several objects at once.
     """

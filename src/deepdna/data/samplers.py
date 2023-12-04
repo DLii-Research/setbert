@@ -2,7 +2,7 @@ from dnadb import taxonomy
 import numpy as np
 import numpy.typing as npt
 from tqdm import trange
-from typing import Iterable
+from typing import Iterable, List, Literal, Optional, Tuple, Union
 
 class TaxonomyDbSampler:
     """
@@ -15,8 +15,9 @@ class TaxonomyDbSampler:
         taxonomy_db: taxonomy.TaxonomyDb,
         splits: Iterable[int],
         rng: np.random.Generator,
-        first_split_contains_all_labels: bool = True
-    ) -> tuple["TaxonomyDbSampler", "TaxonomyDbSampler"]:
+        first_split_contains_all_labels: bool = True,
+        weight_by: Literal["taxonomy", "sequence"] = "sequence"
+    ) -> Tuple["TaxonomyDbSampler", "TaxonomyDbSampler"]:
         """
         Create sampling splits by sequence.
 
@@ -73,7 +74,7 @@ class TaxonomyDbSampler:
 
         return tuple(cls(taxonomy_db, weights) for weights in split_weights) # type: ignore
 
-    def __init__(self, taxonomy_db: taxonomy.TaxonomyDb, sequence_weights: list[npt.NDArray[np.float32]|None]):
+    def __init__(self, taxonomy_db: taxonomy.TaxonomyDb, sequence_weights: Optional[List[npt.NDArray[np.float32]]]):
         self.taxonomy_db = taxonomy_db
         self.label_weights = np.ones(len(sequence_weights), dtype=np.float32)
         self.sequence_weights = []
@@ -85,7 +86,7 @@ class TaxonomyDbSampler:
             self.sequence_weights.append(weights / np.sum(weights))
         self.label_weights /= np.sum(self.label_weights)
 
-    def sample(self, shape: int|tuple[int, ...], rng: np.random.Generator):
+    def sample(self, shape: Union[int, Tuple[int, ...]], rng: np.random.Generator):
         result = np.empty(np.product(shape), dtype=object)
         result[:] = [
             taxonomy.TaxonomyDbEntry(

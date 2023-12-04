@@ -5,7 +5,6 @@ A Tensorflow implementation of sef attention attribution: https://arxiv.org/abs/
 from collections import defaultdict
 from graphviz import Digraph
 from lmdbm import Lmdb
-from numba import njit
 import numpy as np
 from pathlib import Path
 import pickle
@@ -13,10 +12,10 @@ import settransformer as st
 import tensorflow as tf
 import time
 from tqdm import tqdm, trange
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, List, Optional, Union
 
 
-def find_mha_layers(model) -> list[tf.keras.layers.Layer]:
+def find_mha_layers(model) -> List[tf.keras.layers.Layer]:
     """
     Find all multi-head attention layers within a model.
     """
@@ -79,11 +78,11 @@ def find_mha_layers(model) -> list[tf.keras.layers.Layer]:
 #     store.close()
 
 
-def token_attribution(attribution_path: str|Path, metadata_key = lambda x: x, tau=0.4):
+def token_attribution(attribution_path: Union[str, Path], metadata_key = lambda x: x, tau=0.4):
     """
     Compute token attribution scores and build the attribution graph.
     """
-    store = Lmdb.open(attribution_path)
+    store = Lmdb.open(str(attribution_path))
     length = store["length"] if "length" in store else len(store)//4
 
     token_ids = {}
@@ -195,7 +194,7 @@ def build_attribution_tree(vertices, edges, node_labels):
     return tree
 
 
-@njit
+# @njit
 def _compute_token_attributions(attrs_by_layer):
     """
     Compute the attribution scores by token.
