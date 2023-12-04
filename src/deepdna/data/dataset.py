@@ -1,6 +1,6 @@
 import enum
 from pathlib import Path
-from typing import Callable, Generator, Iterable
+from typing import Callable, Generator, Iterable, Union
 
 class Split(enum.Flag):
     Train = enum.auto()
@@ -11,7 +11,7 @@ class Dataset:
 
     Split = Split
 
-    def __init__(self, path: str|Path):
+    def __init__(self, path: Union[str,Path]):
         """
         A wrapper for DNA datasets.
         """
@@ -30,11 +30,10 @@ class Dataset:
         """
         Check if this dataset has a test set.
         """
-        match split:
-            case Split.Train:
-                return True
-            case Split.Test:
-                return self.test_path is not None
+        if split == Split.Train:
+            return True
+        elif split == Split.Test:
+            return self.test_path is not None
         return False
 
     def find(self, test: Callable[[Path], bool], split: Split) -> Generator[Path, None, None]:

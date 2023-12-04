@@ -1,5 +1,5 @@
 import tensorflow as tf
-from typing import Optional
+from typing import Optional, Union
 
 from .dnabert import DnaBertEncoderModel
 from .transformer import AttentionScoreProvider, SetTransformerModel
@@ -18,7 +18,7 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         max_set_len: int,
         stack: int,
         num_heads: int,
-        num_induce: int|None = None,
+        num_induce: Union[int,None] = None,
         pre_layernorm: bool = True,
         **kwargs
     ):
@@ -141,7 +141,7 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
     def call(
         self,
         inputs,
-        training: bool|None = None,
+        training: Union[bool,None] = None,
         return_num_masked: bool = False,
         return_embeddings: bool = False
     ):
@@ -160,7 +160,7 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
     def __call__(
         self,
         inputs,
-        training: bool|None = None,
+        training: Union[bool,None] = None,
         return_num_masked: bool = False,
         return_embeddings: bool = False,
         **kwargs
@@ -199,7 +199,7 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self.stop_sequence_embedding_gradient = stop_sequence_embedding_gradient
         self.output_class = output_class
         self.output_sequences = output_sequences
-        self.embed_layer: layers.ChunkedEmbeddingLayer|None = None
+        self.embed_layer: Union[layers.ChunkedEmbeddingLayer,None] = None
 
     def build_model(self):
         if self.compute_sequence_embeddings:
@@ -253,7 +253,7 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         inputs,
         compute_sequence_embeddings: bool = True,
         return_attention_scores: bool = False,
-        training: bool|None = None,
+        training: Union[bool,None] = None,
         **kwargs
     ):
         model = self.get_model(return_attention_scores)
@@ -265,7 +265,7 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self,
         inputs,
         return_attention_scores: bool = False,
-        training: bool|None = None,
+        training: Union[bool,None] = None,
         **kwargs
     ):
         return super().__call__(inputs, training=training, **(kwargs | dict(

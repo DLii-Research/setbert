@@ -1,5 +1,5 @@
 import tensorflow as tf
-from typing import Optional
+from typing import Optional, Tuple, Union
 
 from .custom_model import CustomModel
 from ..metrics import contrastive_accuracy
@@ -13,7 +13,7 @@ class ContrastiveModel(CustomModel):
         encoder_a: tf.keras.models.Model,
         encoder_b: Optional[tf.keras.models.Model] = None,
         embed_dim: Optional[int] = None,
-        activation: str|None = None,
+        activation: Union[str,None] = None,
         use_shared_projections: Optional[bool] = None,
         use_temperature: bool = True,
         shared_latent_space: bool = False,
@@ -96,13 +96,13 @@ class ContrastiveModel(CustomModel):
 
     def call(
         self,
-        inputs: tuple[tf.Tensor, tf.Tensor],
+        inputs: Tuple[tf.Tensor, tf.Tensor],
         training: Optional[bool]=None,
         _return_norms=False,
         _return_embeddings=False
-    ) -> tf.Tensor \
-        | tuple[tf.Tensor, tuple[tf.Tensor, tf.Tensor]] \
-        | tuple[tf.Tensor, tuple[tf.Tensor, tf.Tensor], tuple[tf.Tensor, tf.Tensor]]:
+    ) -> Union[tf.Tensor, \
+         Tuple[tf.Tensor, Tuple[tf.Tensor, tf.Tensor]], \
+         Tuple[tf.Tensor, Tuple[tf.Tensor, tf.Tensor], Tuple[tf.Tensor, tf.Tensor]]]:
         a, b = inputs[0], inputs[1]
         embeddings_a = self.encoder_a(a, training=training)
         embeddings_b = self.encoder_b(b, training=training)
@@ -133,15 +133,15 @@ class ContrastiveModel(CustomModel):
 
     def __call__(
         self,
-        inputs: tuple[tf.Tensor, tf.Tensor],
+        inputs: Tuple[tf.Tensor, tf.Tensor],
         *args,
         training: Optional[bool]=None,
         _return_norms=False,
         _return_embeddings=False,
         **kwargs
-    ) -> tf.Tensor \
-        | tuple[tf.Tensor, tuple[tf.Tensor, tf.Tensor]] \
-        | tuple[tf.Tensor, tuple[tf.Tensor, tf.Tensor], tuple[tf.Tensor, tf.Tensor]]:
+    ) -> Union[tf.Tensor, \
+         Tuple[tf.Tensor, Tuple[tf.Tensor, tf.Tensor]], \
+         Tuple[tf.Tensor, Tuple[tf.Tensor, tf.Tensor], Tuple[tf.Tensor, tf.Tensor]]]:
         return super().__call__(
             inputs,
             *args,
@@ -170,7 +170,7 @@ class SimClrModel(ContrastiveModel):
         self,
         encoder: tf.keras.models.Model,
         embed_dim: Optional[int] = None,
-        activation: str|None = None,
+        activation: Union[str,None] = None,
         **kwargs
     ):
         super().__init__(
@@ -203,7 +203,7 @@ class DualSimClrModel(ContrastiveModel):
         encoder_a: tf.keras.models.Model,
         encoder_b: tf.keras.models.Model,
         embed_dim: Optional[int] = None,
-        activation: str|None = None,
+        activation: Union[str,None] = None,
         use_shared_projections: bool = True,
         shared_latent_space: bool = False,
         **kwargs
@@ -237,7 +237,7 @@ class ClipModel(ContrastiveModel):
         encoder_a: tf.keras.models.Model,
         encoder_b: Optional[tf.keras.models.Model] = None,
         embed_dim: Optional[int] = None,
-        activation: str|None = None,
+        activation: Union[str,None] = None,
         use_shared_projections: Optional[bool] = None,
         shared_latent_space: bool = False,
         **kwargs

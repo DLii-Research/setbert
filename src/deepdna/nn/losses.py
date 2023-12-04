@@ -2,7 +2,7 @@ from keras.utils import losses_utils
 import numpy as np
 from scipy.spatial.distance import cdist
 import tensorflow as tf
-from typing import Optional, overload
+from typing import Optional, overload, Union
 
 from .registry import CustomObject
 
@@ -11,8 +11,8 @@ from .registry import CustomObject
 # This is the same implementation as in TFG without the shape checks.
 @CustomObject
 def chamfer_distance(
-    point_set_a: tf.Tensor | np.ndarray,
-    point_set_b: tf.Tensor | np.ndarray,
+    point_set_a: Union[tf.Tensor,np.ndarray],
+    point_set_b: Union[tf.Tensor,np.ndarray],
     name: str = "chamfer_distance_evaluate"
 ) -> tf.Tensor:
     """Computes the Chamfer distance for the given two point sets.

@@ -2,7 +2,8 @@
 from dnadb import taxonomy
 import tensorflow as tf
 from settransformer import custom_layers as __settransformer_layers
-from typing import Any, Callable, cast, Generic, Optional, ParamSpec, TypedDict, TypeVar
+from typing import Any, Callable, cast, Dict, Generic, Optional, Tuple, TypedDict, TypeVar, Union
+from typing_extensions import ParamSpec
 
 from . registry import CustomObject, register_custom_objects
 from . utils import subbatch_predict, tfcast
@@ -25,7 +26,7 @@ class TypedLayer(tf.keras.layers.Layer, Generic[Params, ReturnType]):
 # DNA-related Layers -------------------------------------------------------------------------------
 
 @CustomObject
-class KmerEncoder(TypedLayer[[tf.Tensor], tf.Tensor]):
+class KmerEncoder(tf.keras.layers.Layer):
     """
     Encode individual base identifiers into kmer identifiers.
     """
@@ -56,7 +57,7 @@ class KmerEncoder(TypedLayer[[tf.Tensor], tf.Tensor]):
             encoded += 1
         return tf.squeeze(encoded, axis=-1)
 
-    def get_config(self) -> dict[str, Any]:
+    def get_config(self) -> Dict[str, Any]:
         config = super().get_config()
         config.update({
             "kmer": self.kmer,
@@ -70,7 +71,7 @@ class KmerEncoder(TypedLayer[[tf.Tensor], tf.Tensor]):
 # Utility Layers -----------------------------------------------------------------------------------
 
 @CustomObject
-class ContiguousMask(TypedLayer[[tf.Tensor], tf.Tensor]):
+class ContiguousMask(tf.keras.layers.Layer):
     """
     Mask out contiguous blocks of input tokens (provided as integers)
     """
@@ -100,7 +101,7 @@ class ContiguousMask(TypedLayer[[tf.Tensor], tf.Tensor]):
         # Return the masked inputs, and the mask
         return tf.multiply(mask, inputs)
 
-    def get_config(self) -> dict[str, Any]:
+    def get_config(self) -> Dict[str, Any]:
         config = super().get_config()
         config.update({
             "mask_ratio": self.mask_ratio.numpy() # type: ignore
@@ -113,7 +114,7 @@ class ContiguousMask(TypedLayer[[tf.Tensor], tf.Tensor]):
 # the masking part to the layer above.
 # @DeprecationWarning
 @CustomObject
-class TrimAndContiguousMask(TypedLayer[[tf.Tensor], tf.Tensor]):
+class TrimAndContiguousMask(tf.keras.layers.Layer):
     """
     Mask out contiguous blocks of input tokens (provided as integers).
 
@@ -184,7 +185,7 @@ class TrimAndContiguousMask(TypedLayer[[tf.Tensor], tf.Tensor]):
         # Return the masked inputs
         return result
 
-    def get_config(self) -> dict[str, Any]:
+    def get_config(self) -> Dict[str, Any]:
         config = super().get_config()
         config.update({
             "min_len": self.min_len,
@@ -196,7 +197,7 @@ class TrimAndContiguousMask(TypedLayer[[tf.Tensor], tf.Tensor]):
 
 T = TypeVar("T")
 @CustomObject
-class InvertMask(TypedLayer[[T], T]):
+class InvertMask(tf.keras.layers.Layer):
     """
     Invert the current mask. Useful for BERT models where we *want* to pay attention to the
     masked elements.
@@ -206,7 +207,7 @@ class InvertMask(TypedLayer[[T], T]):
             return None
         return tf.logical_not(mask)
 
-    def call(self, inputs: T) -> T:
+    def call(self, inputs):
         # If no operation is performed, TF ignores this layer.
         # Need a nice way to fix this, but this works for now.
         return inputs + 0 # type: ignore
@@ -214,7 +215,7 @@ class InvertMask(TypedLayer[[T], T]):
 # Miscellaneous ------------------------------------------------------------------------------------
 
 @CustomObject
-class GumbelSoftmax(TypedLayer[[tf.Tensor, float], tuple[tf.Tensor, tf.Tensor]]):
+class GumbelSoftmax(tf.keras.layers.Layer):
     """
     Stolen from: https://github.com/gugarosa/nalp/blob/master/nalp/models/layers/gumbel_softmax.py
 
@@ -237,7 +238,7 @@ class GumbelSoftmax(TypedLayer[[tf.Tensor, float], tuple[tf.Tensor, tf.Tensor]])
         # Defining a property for holding the intended axis
         self.axis = axis
 
-    def gumbel_distribution(self, input_shape: tuple[int, ...], eps=1e-20):
+    def gumbel_distribution(self, input_shape: Tuple[int, ...], eps=1e-20):
         """
         Samples a tensor from a Gumbel distribution.
         Args:
@@ -254,7 +255,7 @@ class GumbelSoftmax(TypedLayer[[tf.Tensor, float], tuple[tf.Tensor, tf.Tensor]])
 
         return gumbel_dist
 
-    def call(self, inputs: tf.Tensor, tau: float) -> tuple[tf.Tensor, tf.Tensor]:
+    def call(self, inputs: tf.Tensor, tau: float) -> Tuple[tf.Tensor, tf.Tensor]:
         """
         Method that holds vital information whenever this class is called.
         Args:
@@ -275,7 +276,7 @@ class GumbelSoftmax(TypedLayer[[tf.Tensor, float], tuple[tf.Tensor, tf.Tensor]])
 
         return cast(tuple[tf.Tensor, tf.Tensor], (x, y))
 
-    def get_config(self) -> dict[str, Any]:
+    def get_config(self) -> Dict[str, Any]:
         """
         Gets the configuration of the layer for further serialization.
         """
@@ -288,7 +289,7 @@ class GumbelSoftmax(TypedLayer[[tf.Tensor, float], tuple[tf.Tensor, tf.Tensor]])
 # Multi-head Attention -----------------------------------------------------------------------------
 
 @CustomObject
-class VaswaniMultiHeadAttention(TypedLayer[[tf.Tensor, tf.Tensor, tf.Tensor|None], tf.Tensor]):
+class VaswaniMultiHeadAttention(tf.keras.layers.Layer):
     def __init__(self, embed_dim, num_heads):
         super().__init__()
         self.embed_dim = embed_dim
@@ -323,7 +324,7 @@ class VaswaniMultiHeadAttention(TypedLayer[[tf.Tensor, tf.Tensor, tf.Tensor|None
         out = tf.concat(tf.split(tf.matmul(att, v_split), self.num_heads, 0), 2)
         return out
 
-    def call(self, q: tf.Tensor, v: tf.Tensor, k:tf.Tensor|None = None, training = None):
+    def call(self, q: tf.Tensor, v: tf.Tensor, k:Union[tf.Tensor,None] = None, training = None):
         if k is None:
             k = v
         return self.compute_multihead_attention(q, v, k)
@@ -343,7 +344,7 @@ class RelativeMultiHeadAttention(tf.keras.layers.MultiHeadAttention):
         super().__init__(**kwargs)
         self._max_seq_len = max_seq_len
 
-    def build(self, input_shape: tuple[int, ...]):
+    def build(self, input_shape: Tuple[int, ...]):
         if self._max_seq_len is None:
             self._max_seq_len = input_shape[1]
             assert self._max_seq_len is not None, \
@@ -366,8 +367,8 @@ class RelativeMultiHeadAttention(tf.keras.layers.MultiHeadAttention):
         query: tf.Tensor,
         key: tf.Tensor,
         value: tf.Tensor,
-        attention_mask: tf.Tensor|None = None,
-        training: bool|None = None
+        attention_mask: Union[tf.Tensor,None] = None,
+        training: Union[bool,None] = None
     ):
         # Note: Applying scalar multiply at the smaller end of einsum improves
         # XLA performance, but may introduce slight numeric differences in
@@ -400,13 +401,13 @@ class RelativeMultiHeadAttention(tf.keras.layers.MultiHeadAttention):
 
 # Transformers -------------------------------------------------------------------------------------
 
-class BaseTransformerBlock(TypedLayer[[tf.Tensor], tf.Tensor]):
+class BaseTransformerBlock(tf.keras.layers.Layer):
     def __init__(
         self,
         embed_dim: int,
         num_heads: int,
         ff_dim: int,
-        ff_activation: Any|None = "gelu",
+        ff_activation: Union[Any,None] = "gelu",
         dropout_rate=0.1,
         prenorm=False,
         **kwargs):
@@ -487,7 +488,7 @@ class TransformerBlock(BaseTransformerBlock):
             return VaswaniMultiHeadAttention(num_heads=num_heads, embed_dim=embed_dim)
         return tf.keras.layers.MultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
 
-    def build(self, input_shape: tuple[int, ...]):
+    def build(self, input_shape: Tuple[int, ...]):
         if not self.use_vaswani_mha:
             self.att._build_from_signature(input_shape, input_shape)
         return super().build(input_shape)
@@ -505,14 +506,14 @@ class RelativeTransformerBlock(BaseTransformerBlock):
     def create_attention_layer(self, embed_dim: int, num_heads: int):
         return RelativeMultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
 
-    def build(self, input_shape: tuple[int, ...]):
+    def build(self, input_shape: Tuple[int, ...]):
         self.att._build_from_signature(input_shape, input_shape)
         return super().build(input_shape)
 
 # Transformer Utility Layers -----------------------------------------------------------------------
 
 @CustomObject
-class FixedPositionEmbedding(TypedLayer[[tf.Tensor], tf.Tensor]):
+class FixedPositionEmbedding(tf.keras.layers.Layer):
     def __init__(self, length: int, embed_dim: int):
         super().__init__()
         self.length = length
@@ -535,7 +536,7 @@ class FixedPositionEmbedding(TypedLayer[[tf.Tensor], tf.Tensor]):
 
 
 @CustomObject
-class EmbeddingWithClassToken(TypedLayer[[tf.Tensor], tf.Tensor]):
+class EmbeddingWithClassToken(tf.keras.layers.Layer):
     def __init__(self, num_tokens: int, embed_dim: int, mask_zero: bool = False, **kwargs):
         super().__init__(**kwargs)
         self.num_tokens = num_tokens
@@ -590,7 +591,7 @@ class InjectClassToken(tf.keras.layers.Layer):
 
 
 @CustomObject
-class SplitClassToken(TypedLayer[[tf.Tensor], tuple[tf.Tensor, tf.Tensor]]):
+class SplitClassToken(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -599,7 +600,7 @@ class SplitClassToken(TypedLayer[[tf.Tensor], tuple[tf.Tensor, tf.Tensor]]):
             return None
         return None, mask[:,1:]
 
-    def call(self, inputs: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor]:
+    def call(self, inputs: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         token = inputs[:,0,:]   # type: ignore
         others = inputs[:,1:,:] # type: ignore
         return token, others
@@ -670,13 +671,13 @@ class SetMask(tf.keras.layers.Layer):
 
 # Time-distributed Layers --------------------------------------------------------------------------
 
-class ChunkedEmbeddingLayer(TypedLayer[[tf.Tensor], tf.Tensor]):
+class ChunkedEmbeddingLayer(tf.keras.layers.Layer):
     """
     A time distributed layer that evaluates in chunks.
     """
     def __init__(
         self,
-        layer: tf.keras.layers.Layer|tf.keras.models.Model,
+        layer: Union[tf.keras.layers.Layer,tf.keras.models.Model],
         chunk_size: Optional[int] = None,
         stop_gradient: bool = True,
         **kwargs
@@ -709,13 +710,13 @@ class ChunkedEmbeddingLayer(TypedLayer[[tf.Tensor], tf.Tensor]):
 # Set Generation -----------------------------------------------------------------------------------
 
 @CustomObject
-class SampleSet(TypedLayer[[tf.Tensor], tf.Tensor]):
+class SampleSet(tf.keras.layers.Layer):
     def __init__(self, max_set_size: int, embed_dim: int, **kwargs):
         super().__init__(**kwargs)
         self.max_set_size = max_set_size
         self.embed_dim = embed_dim
 
-    def build(self, input_shape: tuple[int, ...]):
+    def build(self, input_shape: Tuple[int, ...]):
         self.mu = self.add_weight(
             shape=(self.max_set_size, self.embed_dim),
             dtype=tf.float32,

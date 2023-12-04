@@ -4,12 +4,12 @@ from dnadb.utils import sort_dict
 import json
 import numpy as np
 import numpy.typing as npt
-from typing import Iterable
+from typing import Dict, Iterable, List, Tuple, Union
 
 class AbstractTaxonomyTokenizer(abc.ABC):
 
     @classmethod
-    def deserialize(cls, taxonomy_tokenizer_bytes: str|bytes):
+    def deserialize(cls, taxonomy_tokenizer_bytes: Union[str,bytes]):
         deserialized = json.loads(taxonomy_tokenizer_bytes)
         tokenizer = cls(deserialized["depth"])
         tokenizer.tree = deserialized["tree"]
@@ -84,14 +84,14 @@ class AbstractTaxonomyTokenizer(abc.ABC):
         return taxonomy.join_taxonomy(self.detokenize_taxons(tokens))
 
     @abc.abstractmethod
-    def tokenize_taxons(self, taxons: tuple[str, ...]) -> npt.NDArray[np.int32]:
+    def tokenize_taxons(self, taxons: Tuple[str, ...]) -> npt.NDArray[np.int32]:
         """
         Tokenize the given taxons.
         """
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def detokenize_taxons(self, tokens: npt.NDArray[np.int32]) -> tuple[str, ...]:
+    def detokenize_taxons(self, tokens: npt.NDArray[np.int32]) -> Tuple[str, ...]:
         """
         Detokenize the given taxon identifiers into taxons.
         """
@@ -120,7 +120,7 @@ class NaiveTaxonomyTokenizer(AbstractTaxonomyTokenizer):
                 if depth + 1 < self.depth:
                     q.append((depth + 1, children))
 
-    def tokenize_taxons(self, taxons: tuple[str, ...]):
+    def tokenize_taxons(self, taxons: Tuple[str, ...]):
         result = np.empty(len(taxons), np.int32)
         for depth, taxon in enumerate(taxons):
             result[depth] = self.taxon_to_id_map[depth][taxon]
@@ -165,7 +165,7 @@ class TopDownTaxonomyTokenizer(AbstractTaxonomyTokenizer):
     def tokenize_label(self, label: str) -> npt.NDArray[np.int32]:
         return self.tokenize_taxons(taxonomy.split_taxonomy(label, keep_empty=True)[:self.depth])
 
-    def tokenize_taxons(self, taxons: tuple[str, ...]) -> npt.NDArray[np.int32]:
+    def tokenize_taxons(self, taxons: Tuple[str, ...]) -> npt.NDArray[np.int32]:
         result = np.empty(len(taxons), np.int32)
         for i in range(len(taxons)):
             result[i] = self.taxons_to_id_map[taxons[:i+1]]
@@ -174,7 +174,7 @@ class TopDownTaxonomyTokenizer(AbstractTaxonomyTokenizer):
     def detokenize_label(self, taxon_tokens: npt.NDArray[np.int32]) -> str:
         return taxonomy.join_taxonomy(self.detokenize_taxons(taxon_tokens), depth=self.depth)
 
-    def detokenize_taxons(self, taxon_tokens: npt.NDArray[np.int32]) -> tuple[str, ...]:
+    def detokenize_taxons(self, taxon_tokens: npt.NDArray[np.int32]) -> Tuple[str, ...]:
         i = len(taxon_tokens) - 1
         return self.id_to_taxons_map[i][taxon_tokens[i]]
 
@@ -193,13 +193,13 @@ class TopDownTaxonomyTokenizer(AbstractTaxonomyTokenizer):
                 stack.append((next_taxons, children))
 
     @property
-    def id_to_taxons_map(self) -> tuple[list[tuple[str, ...]], ...]:
+    def id_to_taxons_map(self) -> Tuple[List[Tuple[str, ...]], ...]:
         if self._id_to_taxons_map is None:
             self.build()
         return self._id_to_taxons_map
 
     @property
-    def taxons_to_id_map(self) -> dict[tuple[str, ...], int]:
+    def taxons_to_id_map(self) -> Dict[Tuple[str, ...], int]:
         if self._taxons_to_id_map is None:
             self.build()
         return self._taxons_to_id_map

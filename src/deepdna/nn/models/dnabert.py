@@ -1,5 +1,5 @@
 import tensorflow as tf
-from typing import cast, Optional
+from typing import cast, Optional, Union
 
 from .custom_model import ModelWrapper, CustomModel
 from .. import layers
@@ -71,8 +71,8 @@ class DnaBertPretrainModel(ModelWrapper, CustomModel):
         self,
         base: DnaBertModel,
         mask_ratio: float = 0.15,
-        min_len: int|None = None,
-        max_len: int|None = None,
+        min_len: Union[int,None] = None,
+        max_len: Union[int,None] = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -133,7 +133,7 @@ class DnaBertEncoderModel(ModelWrapper, tf.keras.Model):
         token, _ = layers.SplitClassToken()(y)
         return tf.keras.Model(x, token)
 
-    def encode(self, batch: tf.Tensor, chunk_size: int|None = None):
+    def encode(self, batch: tf.Tensor, chunk_size: Union[int,None] = None):
         """
         Deprecated
         """

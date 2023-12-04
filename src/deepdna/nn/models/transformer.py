@@ -1,6 +1,6 @@
 import settransformer as st
 import tensorflow as tf
-from typing import Optional
+from typing import List, Optional, Tuple, Union
 
 from .custom_model import CustomModel, ModelWrapper
 from ..registry import CustomObject
@@ -56,7 +56,7 @@ class SetTransformerModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self,
         embed_dim: int,
         num_heads: int,
-        num_induce: int|None = None,
+        num_induce: Union[int,None] = None,
         stack: int = 1,
         pre_layernorm: bool = True,
         max_set_len: Optional[int] = None,
@@ -111,7 +111,7 @@ class SetTransformerModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         training: Optional[bool] = None,
         return_attention_scores: bool = False,
         **kwargs
-    ) -> tf.Tensor | tuple[tf.Tensor, list[tf.Tensor]]:
+    ) -> Union[tf.Tensor , Tuple[tf.Tensor, List[tf.Tensor]]]:
         return super().__call__(
             inputs,
             *args,

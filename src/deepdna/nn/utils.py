@@ -1,11 +1,11 @@
 import numpy as np
 import numpy.typing as npt
 import tensorflow as tf
-from typing import Any, Callable, cast, TypeVar, Type
+from typing import Any, Callable, cast, TypeVar, Type, Union
 
 TensorflowObject = TypeVar("TensorflowObject")
 
-def tfcast(value: TensorflowObject, dtype: tf.DType, name: str|None = None) -> TensorflowObject:
+def tfcast(value: TensorflowObject, dtype: tf.DType, name: Union[str,None] = None) -> TensorflowObject:
     """
     A type-aware cast function for Tensorflow objects.
 

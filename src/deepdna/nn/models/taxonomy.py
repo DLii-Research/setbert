@@ -3,7 +3,7 @@ from dnadb import taxonomy
 import numpy as np
 import numpy.typing as npt
 import tensorflow as tf
-from typing import Generic, Optional, TypeVar
+from typing import Generic, Optional, Tuple, TypeVar
 
 from .custom_model import ModelWrapper, CustomModel
 from ..losses import SparseCategoricalCrossentropyWithIgnoreClass
@@ -234,7 +234,7 @@ class TopDownTaxonomyClassificationModel(AbstractHierarchicalTaxonomyClassificat
             self._predictive_model = tf.keras.Model(self.input, outputs)
         return self._predictive_model
 
-    def predictions_to_labels(self, y_pred: tuple[tf.Tensor, ...]):
+    def predictions_to_labels(self, y_pred: Tuple[tf.Tensor, ...]):
         result = []
         for y in y_pred:
             if y.ndim == 1:
