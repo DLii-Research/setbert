@@ -34,7 +34,10 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[Mod
         raise NotImplementedError()
 
     def predict(self, *args, confidence: float = 0.7, **kwargs):
-        return self._prediction_to_taxonomy(super().predict(*args, **kwargs), confidence)
+        return self._prediction_to_taxonomy(self.predict_probabilities(*args, **kwargs), confidence)
+
+    def predict_probabilities(self, *args, **kwargs):
+        return super().predict(*args, **kwargs)
 
     def get_config(self):
         return {
