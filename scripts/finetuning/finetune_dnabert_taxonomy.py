@@ -21,7 +21,7 @@ class PersistentDnaBertNaiveTaxonomyModel(
 ):
     def create(self, config: argparse.Namespace):
         # Load the tree from the database
-        with taxonomy.TaxonomyDb(config.dataset_path / "taxonomy.tax.db") as tax_db:
+        with taxonomy.TaxonomyDb(config.dataset_path / "taxonomy.tsv.db") as tax_db:
             taxonomy_tree = tax_db.tree
         # Get the pre-trained DNABERT model
         wandb = self.context.get(dcs.module.Wandb)
@@ -78,9 +78,13 @@ def define_arguments(context: dcs.Context):
 
 def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int):
     train_fasta_db = fasta.FastaDb(config.dataset_path / "sequences.fasta.db")
-    train_tax_db = taxonomy.TaxonomyDb(config.dataset_path / "taxonomy.tax.db", train_fasta_db)
-    val_fasta_db = fasta.FastaDb(config.dataset_path / "sequences.test.fasta.db")
-    val_tax_db = taxonomy.TaxonomyDb(config.dataset_path / "taxonomy.test.tax.db", val_fasta_db)
+    train_tax_db = taxonomy.TaxonomyDb(config.dataset_path / "taxonomy.tsv.db", train_fasta_db)
+    if (config.dataset_path / "sequences.test.fasta.db").exists():
+        val_fasta_db = fasta.FastaDb(config.dataset_path / "sequences.test.fasta.db")
+        val_tax_db = taxonomy.TaxonomyDb(config.dataset_path / "taxonomy.test.tsv.db", val_fasta_db)
+    else:
+        val_fasta_db = train_fasta_db
+        val_tax_db = train_tax_db
 
     # Construct the main pipeline
     body_pipeline = [
@@ -124,7 +128,7 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
         *body_pipeline,
         dg.taxonomy_entries(val_tax_db),
         *tail_pipeline
-    ])
+    ], shuffle=id(train_fasta_db) != id(val_fasta_db))
 
     return (train_data, val_data)
 
@@ -168,7 +172,7 @@ if __name__ == "__main__":
         .optional_training() \
         .use_steps() \
         .defaults(
-            epochs=None,
+            epochs=2000,
             batch_size=256,
             val_batch_size=128,
             steps_per_epoch=100,
