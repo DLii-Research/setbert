@@ -18,8 +18,7 @@ function create_silva_dataset() {
     # Sequences
     if [ ! -d "${dataset_path}/sequences.fasta.db" ]; then
         dnadb fasta import \
-            --min-length ${min_sequence_length} \
-            "${data_path}/silva/silva-${silva_version}${variant}-seqs${suffix}.fasta" \
+            "${data_path}/silva/${silva_version}${variant}/silva-${silva_version}${variant}-seqs${suffix}.fasta" \
             "${dataset_path}/sequences.fasta.db"
     fi
     # Taxonomy
@@ -27,16 +26,16 @@ function create_silva_dataset() {
         dnadb taxonomy import \
             --depth ${taxonomy_precision} \
             --fasta-db "${dataset_path}/sequences.fasta.db" \
-            "${data_path}/silva/silva-${silva_version}${variant}-tax${suffix}.tsv" \
+            "${data_path}/silva/${silva_version}${variant}/silva-${silva_version}${variant}-tax${suffix}.tsv" \
             "${dataset_path}/taxonomy.tax.db"
     fi
-    Test dataset
+    # Test dataset
     if [ ! -d "${dataset_path}/sequences.test.fasta.db" ] || [ ! -d "${dataset_path}/taxonomy.test.tax.db" ]; then
         echo "  Generating test dataset..."
         python3 ./scripts/dataset/prepare_silva_test_dataset.py \
             --reference-tax-db "${dataset_path}/taxonomy.tax.db" \
-            --sequences-path "${data_path}/silva/silva-${silva_version}-seqs${suffix}.fasta" \
-            --taxonomy-path "${data_path}/silva/silva-${silva_version}-tax${suffix}.tsv" \
+            --sequences-path "${data_path}/silva/${silva_version}${variant}/silva-${silva_version}-seqs${suffix}.fasta" \
+            --taxonomy-path "${data_path}/silva/${silva_version}${variant}/silva-${silva_version}-tax${suffix}.tsv" \
             --output-path "${dataset_path}"
     fi
 }
@@ -66,10 +65,48 @@ echo "Preparing SILVA NR99 Filtered 515f/806r Dataset..."
 create_silva_dataset "${datasets_path}/silva_nr99_filtered_515f_806r" "515f-806r-derep-uniq" "99"
 
 # Hopland
-# mkdir -p "${datasets_path}/hopland"
+mkdir -p "${datasets_path}/hopland"
+if [ ! -d "${datasets_path}/hopland/sequences.fasta.db" ]; then
+    echo "Creating Hopland dataset..."
+    dnadb fasta import-multiplexed \
+        --min-length ${min_sequence_length} \
+        --output-sequences-path "${datasets_path}/hopland/sequences.fasta.db" \
+        --output-mapping-path "${datasets_path}/hopland/sequences.fasta.mapping.db" \
+        "${data_path}/hopland"/fastq/Ur*_R1_001.fastq*
+fi
+if [ ! -f "${datasets_path}/hopland/sequences.fasta" ]; then
+    dnadb fasta export \
+        "${datasets_path}/hopland/sequences.fasta.db" \
+        "${datasets_path}/hopland/sequences.fasta"
+fi
+if [ ! -f "${datasets_path}/hopland/sequences.qza" ]; then
+    ${command_prefix} conda run -n ${qiime2_env} qiime tools import \
+        --input-path "${datasets_path}/hopland/sequences.fasta" \
+        --output-path "${datasets_path}/hopland/sequences.qza" \
+        --type 'FeatureData[Sequence]'
+fi
 
-# # Nachusa
-# mkdir -p "${datasets_path}/nachusa"
+# Nachusa
+mkdir -p "${datasets_path}/nachusa"
+if [ ! -d "${datasets_path}/nachusa/sequences.fasta.db" ]; then
+    echo "Creating Nachusa dataset..."
+    dnadb fasta import-multiplexed \
+        --min-length ${min_sequence_length} \
+        --output-sequences-path "${datasets_path}/nachusa/sequences.fasta.db" \
+        --output-mapping-path "${datasets_path}/nachusa/sequences.fasta.mapping.db" \
+        $(grep -L "PCRblank" "${data_path}/nachusa/fastq"/*.fastq*) # Ignore blanks
+fi
+if [ ! -f "${datasets_path}/nachusa/sequences.fasta" ]; then
+    dnadb fasta export \
+        "${datasets_path}/nachusa/sequences.fasta.db" \
+        "${datasets_path}/nachusa/sequences.fasta"
+fi
+if [ ! -f "${datasets_path}/nachusa/sequences.qza" ]; then
+    ${command_prefix} conda run -n ${qiime2_env} qiime tools import \
+        --input-path "${datasets_path}/nachusa/sequences.fasta" \
+        --output-path "${datasets_path}/nachusa/sequences.qza" \
+        --type 'FeatureData[Sequence]'
+fi
 
 # # Snake Fungal Disease (SFD)
 # mkdir -p "${datasets_path}/sfd"

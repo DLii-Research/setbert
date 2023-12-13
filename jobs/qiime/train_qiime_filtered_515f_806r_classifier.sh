@@ -20,8 +20,3 @@ if [ ! -f "${qiime_path}/silva-${silva_version}-filtered-515f-806r-nb-classifier
         --o-observed-taxonomy "${qiime_path}/silva-${silva_version}-filtered-515f-806r-nb-classifier-prediction.qza" \
         --o-evaluation "${qiime_path}/silva-${silva_version}-filtered-515f-806r-nb-classifier-evaluation.qzv"
 fi
-
-echo "Exporting classifier..."
-${command_prefix} conda run -n ${qiime2_env} qiime tools export \
-    --input-path "${qiime_path}/silva-${silva_version}-filtered-515f-806r-nb-classifier.qza" \
-    --output-path "${qiime_path}/silva-${silva_version}-filtered-515f-806r-nb-classifier"
