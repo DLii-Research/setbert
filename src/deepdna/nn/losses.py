@@ -214,6 +214,12 @@ def taxonomy_relative_abundance_loss(y_true, y_pred):
 
 
 @CustomObject
+def taxonomy_relative_abundance_distribution_loss(y_true, y_pred):
+    minimum_entropy = tf.keras.losses.categorical_crossentropy(y_true, y_true)
+    return tf.keras.losses.categorical_crossentropy(y_true, y_pred) - minimum_entropy
+
+
+@CustomObject
 class SparseCategoricalCrossentropyWithIgnoreClass(tf.keras.losses.SparseCategoricalCrossentropy):
     def __init__(
         self,

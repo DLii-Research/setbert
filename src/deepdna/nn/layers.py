@@ -643,6 +643,31 @@ class SetMask(tf.keras.layers.Layer):
     @property
     def num_mask_tokens(self):
         return int(self.set_size*self.mask_ratio)
+    
+
+@CustomObject
+class SetMaskEmbedding(tf.keras.layers.Layer):
+    def __init__(self, embed_dim: int, **kwargs):
+        super().__init__(**kwargs)
+        self.embed_dim = embed_dim
+        self.mask_embedding = self.add_weight(
+            shape=(1, 1, self.embed_dim),
+            dtype=tf.float32,
+            trainable=True,
+            name="Mask_Embeddings")
+
+    def call(self, inputs):
+        batch_size = tf.shape(inputs)[0]
+        mask_embeddings = tf.tile(self.mask_embedding, (batch_size, 1, 1))
+        return tf.concat((inputs, mask_embeddings), axis=1)
+
+    def masked_sequences_embedding(self, inputs):
+        return inputs[:,-1,:]
+
+    def get_config(self):
+        return super().get_config() | {
+            "embed_dim": self.embed_dim
+        }
 
 # Time-distributed Layers --------------------------------------------------------------------------
 

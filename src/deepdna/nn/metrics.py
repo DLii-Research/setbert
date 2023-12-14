@@ -89,6 +89,11 @@ def taxonomy_relative_abundance_accuracy(y_true, y_pred):
 
 
 @CustomObject
+def taxonomy_relative_abundance_distribution_accuracy(y_true, y_pred):
+    return tf.reduce_sum(tf.math.minimum(y_true, y_pred), axis=1)
+
+
+@CustomObject
 class SparseCategoricalAccuracyWithIgnoreClass(tf.keras.metrics.SparseCategoricalAccuracy):
     def __init__(self, ignore_class=None, name="sparse_categorical_accuracy", dtype=None):
         super().__init__(name=name, dtype=dtype)
