@@ -23,9 +23,9 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         embed_dim: int,
         stack: int,
         num_heads: int,
-        num_induce: int|None = None,
+        num_induce: Optional[int] = None,
         pre_layernorm: bool = True,
-        max_set_len: int|None = None,
+        max_set_len: Optional[int] = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -63,7 +63,8 @@ class SetBertModel(AttentionScoreProvider, ModelWrapper, CustomModel):
             **kwargs)
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "dnabert_encoder": self.dnabert_encoder,
             "embed_dim": self.embed_dim,
             "max_set_len": self.max_set_len,
@@ -96,7 +97,7 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
         super().__init__(**kwargs)
         self.set_components(base=base)
         self.masking = layers.SetMask(self.base.embed_dim, self.base.max_set_len, mask_ratio)
-        self.embed_layer: layers.ChunkedEmbeddingLayer|None = None
+        self.embed_layer: Optional[layers.ChunkedEmbeddingLayer] = None
 
     def build_model(self):
         y = x = tf.keras.layers.Input((None,self.base.dnabert_encoder.input_shape[-1]))
@@ -143,7 +144,7 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
     def call(
         self,
         inputs,
-        training: bool|None = None,
+        training: Optional[bool] = None,
         return_num_masked: bool = False,
         return_embeddings: bool = False
     ):
@@ -162,7 +163,7 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
     def __call__(
         self,
         inputs,
-        training: bool|None = None,
+        training: Optional[bool] = None,
         return_num_masked: bool = False,
         return_embeddings: bool = False,
         **kwargs
@@ -176,7 +177,8 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
         )
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "base": self.base,
             "mask_ratio": self.masking.mask_ratio.numpy() # type: ignore
         }
@@ -197,14 +199,14 @@ class SetBertPretrainModel(ModelWrapper, CustomModel):
     @property
     def sequence_length(self):
         return self.base.dnabert_encoder.base.sequence_length
-    
-    
+
+
 @CustomObject
 class SetBertPretrainWithTaxaAbundanceModel(ModelWrapper, CustomModel):
 
     base: SetBertModel
     masking: layers.SetMask
-    embed_layer: layers.ChunkedEmbeddingLayer|None
+    embed_layer: Optional[layers.ChunkedEmbeddingLayer]
 
     def __init__(
         self,
@@ -241,7 +243,8 @@ class SetBertPretrainWithTaxaAbundanceModel(ModelWrapper, CustomModel):
         return [taxonomy_relative_abundance_accuracy]
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "base": self.base,
             "subsample_size": self.subsample_size,
             "num_labels": self.num_labels,
@@ -449,7 +452,7 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self,
         inputs,
         return_attention_scores: bool = False,
-        training: bool|None = None,
+        training: Optional[bool] = None,
         **kwargs
     ):
         model = self.get_model(return_attention_scores)
@@ -459,7 +462,7 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         self,
         inputs,
         return_attention_scores: bool = False,
-        training: bool|None = None,
+        training: Optional[bool] = None,
         **kwargs
     ):
         return super().__call__(inputs, training=training, **(kwargs | dict(
@@ -467,7 +470,8 @@ class SetBertEncoderModel(AttentionScoreProvider, ModelWrapper, CustomModel):
         )))
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "base": self.base,
             "compute_sequence_embeddings": self.compute_sequence_embeddings,
             "stop_sequence_embedding_gradient": self.stop_sequence_embedding_gradient,
@@ -528,7 +532,7 @@ class SetBertSfdClassifierModel(AttentionScoreProvider, ModelWrapper, CustomMode
         y = (y, scores) if return_scores else y
         return tf.keras.Model(x, y)
 
-    def make_attribution_model(self, chunk_size: int|None = None, integration_steps: int = 20):
+    def make_attribution_model(self, chunk_size: Optional[int] = None, integration_steps: int = 20):
         encoder = SetBertEncoderModel(
             self.base.base,
             compute_sequence_embeddings=False,
@@ -570,7 +574,8 @@ class SetBertSfdClassifierModel(AttentionScoreProvider, ModelWrapper, CustomMode
         self.base.chunk_size = value
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "base": self.base.base,
             "freeze_sequence_embeddings": self.freeze_sequence_embeddings
         }
@@ -609,12 +614,13 @@ class SetBertHoplandBulkRhizosphereClassifierModel(AttentionScoreProvider, Model
 
     def _build_model(self, encoder, return_scores):
         y = x = tf.keras.layers.Input(encoder.input_shape[1:])
-        y, scores = encoder(y, return_attention_scores=True)
-        y = self.output_dense(y)
+        embedding, scores = encoder(y, return_attention_scores=True)
+        y = self.output_dense(embedding)
+        y = (y, embedding)
         y = (y, scores) if return_scores else y
         return tf.keras.Model(x, y)
 
-    def make_attribution_model(self, chunk_size: int|None = None, integration_steps: int = 20):
+    def make_attribution_model(self, chunk_size: Optional[int] = None, integration_steps: int = 20):
         encoder = SetBertEncoderModel(
             self.base.base,
             compute_sequence_embeddings=False,
@@ -627,7 +633,8 @@ class SetBertHoplandBulkRhizosphereClassifierModel(AttentionScoreProvider, Model
         _compute_attention_attribution = attention_attribution.attention_attribution_factory(
             sample_encoder,
             next(find_layers(sample_encoder, SetTransformerModel)),
-            integration_steps=integration_steps)
+            integration_steps=integration_steps,
+            y_for_gradient=lambda y: y[0]) # Use the classification output for differentation
         @tf.function()
         def compute_attention_attribution(inputs):
             # return sequence_encoder(inputs)
@@ -658,7 +665,8 @@ class SetBertHoplandBulkRhizosphereClassifierModel(AttentionScoreProvider, Model
         self.base.chunk_size = value
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "base": self.base.base,
             "freeze_sequence_embeddings": self.freeze_sequence_embeddings
         }

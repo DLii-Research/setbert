@@ -1,5 +1,5 @@
 import tensorflow as tf
-from typing import cast
+from typing import cast, Optional
 
 from .custom_model import ModelWrapper, CustomModel
 from .. import layers
@@ -49,7 +49,8 @@ class DnaBertModel(ModelWrapper, CustomModel):
         return tf.keras.Model(x, y)
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "sequence_length": self.sequence_length,
             "kmer": self.kmer,
             "embed_dim": self.embed_dim,
@@ -71,8 +72,8 @@ class DnaBertPretrainModel(ModelWrapper, CustomModel):
         self,
         base: DnaBertModel,
         mask_ratio: float = 0.15,
-        min_len: int|None = None,
-        max_len: int|None = None,
+        min_len: Optional[int] = None,
+        max_len: Optional[int] = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -111,7 +112,8 @@ class DnaBertPretrainModel(ModelWrapper, CustomModel):
         return self.model.compute_output_shape(input_shape)
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "base": self.base,
             "min_len": self.min_len,
             "max_len": self.max_len,
@@ -162,7 +164,8 @@ class DnaBertEncoderModel(ModelWrapper, tf.keras.Model):
         return tf.keras.Model(x, outputs)
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "base": self.base,
             "output_class": self.output_class,
             "output_kmers": self.output_kmers

@@ -10,5 +10,5 @@ ${command_prefix} ${python_tf} ./scripts/evaluation/setbert_evaluate_sfd_classif
     --pretrain-model-artifact $setbert_pretrain_sfd_128d_250l \
     --finetune-model-artifact $setbert_sfd_only_classifier_128d_250l \
     --sfd-dataset-path $datasets_path/SFD250 \
-    --output-path $log_path/setbert-evaluate-sfd-only-classifier-128d-250l \
+    --output-path $log_path/sfd/setbert-evaluate-sfd-only-classifier-128d-250l \
     $@

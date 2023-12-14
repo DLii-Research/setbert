@@ -1,7 +1,7 @@
 import numpy as np
 import numpy.typing as npt
 import tensorflow as tf
-from typing import Any, Callable, cast, Generator, TypeVar
+from typing import Any, Callable, cast, Generator, List, Optional, Type, TypeVar
 
 class PostInit(type):
     """
@@ -45,7 +45,7 @@ def recursive_map(
 TensorflowObject = TypeVar("TensorflowObject")
 
 T = TypeVar("T")
-def find_layers(model_or_layer, model_or_layer_type: type[T], recursive: bool = True) -> Generator[T, None, None]:
+def find_layers(model_or_layer, model_or_layer_type: Type[T], recursive: bool = True) -> Generator[T, None, None]:
     """
     Find all layers of the given type in the given model or layer.
     """
@@ -58,7 +58,7 @@ def find_layers(model_or_layer, model_or_layer_type: type[T], recursive: bool = 
             q += list(layer.layers) # type: ignore
 
 
-def tfcast(value: TensorflowObject, dtype: tf.DType, name: str|None = None) -> TensorflowObject:
+def tfcast(value: TensorflowObject, dtype: tf.DType, name: Optional[str] = None) -> TensorflowObject:
     """
     A type-aware cast function for Tensorflow objects.
 
@@ -78,7 +78,7 @@ def optimizer(name: str, **kwargs) -> tf.keras.optimizers.Optimizer:
 # Model/Layer Utilities ----------------------------------------------------------------------------
 
 class GradientAccumulator:
-    def __init__(self, trainable_weights: list[tf.Variable]):
+    def __init__(self, trainable_weights: List[tf.Variable]):
         self.trainable_weights = trainable_weights
         self.iteration = tf.Variable(0, dtype=tf.int64, trainable=False)
         self._accumulated_gradients = [

@@ -1,6 +1,6 @@
 from pathlib import Path
 import tensorflow as tf
-from typing import Any, cast, TypeVar
+from typing import Any, cast, Dict, Optional, Type, TypeVar, Union
 
 from . import custom_model
 
@@ -17,11 +17,11 @@ from .. import registry
 ModelType = TypeVar("ModelType", bound=tf.keras.Model)
 
 def load_model(
-    path: str|Path,
-    type: type[ModelType] = tf.keras.Model,
-    custom_objects: dict[str, Any]|None = None,
+    path: Union[str, Path],
+    type: Type[ModelType] = tf.keras.Model,
+    custom_objects: Optional[Dict[str, Any]] = None,
     compile: bool = True,
-    options: tf.saved_model.LoadOptions|None = None
+    options: Optional[tf.saved_model.LoadOptions] = None
 ) -> ModelType:
     """
     Load a custom model, providing the necessary custom object layers

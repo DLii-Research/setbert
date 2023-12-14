@@ -11,7 +11,7 @@ from deepdna.nn.models.setbert import SetBertEncoderModel, SetBertPretrainModel,
 from deepdna.nn.utils import find_layers
 
 
-class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject["tf.keras.models.Model"]):
+class PersistentSetBertSfdModel(dcs.module.Wandb.PersistentObject[SetBertSfdClassifierModel]):
     def create(self, config: argparse.Namespace):
         # Create the model
         wandb = self.context.get(dcs.module.Wandb)
@@ -113,15 +113,11 @@ def main(context: dcs.Context):
     # Training
     if config.train:
         print("Training model...")
-        setbert_encoder = next(find_layers(model.instance, SetBertEncoderModel))
-        if config.freeze_sequence_embeddings:
-            setbert_encoder.chunk_size = config.chunk_size
-        else:
-            setbert_encoder.chunk_size = None
+        model.instance.chunk_size = config.chunk_size
         train_data, val_data = data_generators(
             context,
-            setbert_encoder.sequence_length,
-            setbert_encoder.kmer)
+            model.instance.base.sequence_length,
+            model.instance.base.kmer)
         model.path("model").mkdir(exist_ok=True, parents=True)
         context.get(dcs.module.Train).fit(
             model.instance,

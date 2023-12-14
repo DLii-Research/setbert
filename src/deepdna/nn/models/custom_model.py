@@ -1,7 +1,7 @@
 import abc
 import tensorflow as tf
 from pathlib import Path
-from typing import Any, Generic, TypeVar, TYPE_CHECKING
+from typing import Any, Generic, TypeVar, TYPE_CHECKING, Union
 from ..utils import GradientAccumulator, PostInit
 
 if TYPE_CHECKING:
@@ -104,10 +104,10 @@ class ModelWrapper(Generic[ModelType], metaclass=PostInit):
     def summary(self):
         return self.model.summary()
 
-    def save_internal_weights(self, path: str|Path):
+    def save_internal_weights(self, path: Union[str, Path]):
         return self.model.save_weights(path)
 
-    def load_internal_weights(self, path: str|Path):
+    def load_internal_weights(self, path: Union[str, Path]):
         return self.model.load_weights(path)
 
     def __setattr__(self, name, value):
@@ -217,7 +217,6 @@ class CustomModel(tf.keras.Model):
             assert self.compiled_loss is not None
             loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
         grads = tape.gradient(loss, self.trainable_weights)
-        assert self.compiled_metrics is not None
         self.compiled_metrics.update_state(y, y_pred)
         # Accumulate the gradients
         self._gradient_accumulator.accumulate(grads)
@@ -239,7 +238,8 @@ class CustomModel(tf.keras.Model):
             callbacks = []
         callbacks.append(CustomModel.CustomModelEventCallback())
         history = super().fit(*args, callbacks=callbacks, **kwargs)
-        del self._gradient_accumulator
+        if getattr(self, "_gradient_accumulator", None) is not None:
+            del self._gradient_accumulator
         return history
 
     def __call__(self, *args, **kwargs) -> tf.Tensor:
