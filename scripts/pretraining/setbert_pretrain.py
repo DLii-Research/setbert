@@ -1,16 +1,16 @@
 import argparse
-from dnadb import sample
+from dnadb import fasta, taxonomy
 import deepctx.scripting as dcs
 from deepctx.lazy import tensorflow as tf
 from pathlib import Path
-from deepdna.nn import data_generators as dg
-from deepdna.nn.losses import FastSortedLoss
 from deepdna.nn.models import load_model
 from deepdna.nn.models.dnabert import DnaBertEncoderModel, DnaBertPretrainModel
-from deepdna.nn.models.setbert import SetBertModel, SetBertPretrainModel
+from deepdna.nn.models.setbert import SetBertModel, SetBertPretrainWithTaxaAbundanceDistributionModel
 
-class PersistentSetBertPretrainModel(dcs.module.Wandb.PersistentObject[SetBertPretrainModel]):
+class PersistentSetBertPretrainModel(dcs.module.Wandb.PersistentObject[SetBertPretrainWithTaxaAbundanceDistributionModel]):
     def create(self, config: argparse.Namespace):
+        with taxonomy.TaxonomyDb(config.datasets_path / config.reference_dataset / "taxonomy.tsv.db") as db:
+            num_labels = db.num_labels
         wandb = self.context.get(dcs.module.Wandb)
         dnabert_pretrain_path = wandb.artifact_argument_path("dnabert_pretrain")
         dnabert_base = load_model(dnabert_pretrain_path, DnaBertPretrainModel).base
@@ -21,16 +21,21 @@ class PersistentSetBertPretrainModel(dcs.module.Wandb.PersistentObject[SetBertPr
             stack=config.stack,
             num_heads=config.num_heads,
             num_induce=config.num_inducing_points)
-        model = SetBertPretrainModel(base, mask_ratio=config.mask_ratio)
+        model = SetBertPretrainWithTaxaAbundanceDistributionModel(
+            base,
+            num_labels=num_labels,
+            mask_ratio=config.mask_ratio,
+            freeze_sequence_embeddings=config.freeze_sequence_embeddings)
         model.chunk_size = config.chunk_size
+        if config.freeze_sequence_embeddings:
+            base.dnabert_encoder.trainable = False
+        print("Chunk size is", model.embed_layer.chunk_size)
         model.summary()
-        model.compile(
-            optimizer=tf.keras.optimizers.Adam(config.lr),
-            loss=FastSortedLoss())
+        model.compile(optimizer=tf.keras.optimizers.Adam(config.lr))
         return model
 
     def load(self):
-        return load_model(self.path("model"), SetBertPretrainModel)
+        return load_model(self.path("model"), SetBertPretrainWithTaxaAbundanceDistributionModel)
 
     def save(self):
         self.instance.save(self.path("model"))
@@ -45,9 +50,10 @@ class PersistentSetBertPretrainModel(dcs.module.Wandb.PersistentObject[SetBertPr
 def define_arguments(context: dcs.Context):
     parser = context.argument_parser
     group = parser.add_argument_group("Dataset Settings")
-    group.add_argument("--datasets-path", type=Path, help="The path to the datasets directory.")
-    group.add_argument("--datasets", type=lambda x: x.split(','), help="A comma-separated list of the datasets to use for training and validation.")
-    group.add_argument("--distribution", type=str, default="natural", choices=["natural", "presence-absence"], help="The distribution of the data to use for training and validation.")
+    group.add_argument("--datasets-path", type=Path, required=True, help="The path to the datasets directory.")
+    group.add_argument("--datasets", type=str, nargs="+", required=True, help="The names of the datasets to use for training.")
+    group.add_argument("--reference-dataset", type=str, required=True, help="The name of the dataset to use for reference sequences and taxonomies.")
+    group.add_argument("--reference-model", type=str, required=True, help="The name of the model used to assign taxonomies to the real sequences.")
 
     group = parser.add_argument_group("Model Settings")
     group.add_argument("--embed-dim", type=int, default=64)
@@ -58,6 +64,7 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--mask-ratio", type=float, default=0.15)
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
     group.add_argument("--chunk-size", type=int, default=None, help="The number of sequences to process at once. Ignored if --static-dnabert is not set.")
+    group.add_argument("--freeze-sequence-embeddings", action="store_true", help="Freeze the sequence embeddings.")
 
     wandb = context.get(dcs.module.Wandb)
     wandb.add_artifact_argument("dnabert-pretrain", required=True)
@@ -66,32 +73,28 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--log-artifact", type=str, default=None, help="Log the model as a W&B artifact.")
 
 
-def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int):
+def data_generators(config: argparse.Namespace, model: SetBertPretrainWithTaxaAbundanceDistributionModel):
+    sequences_db = fasta.FastaDb(config.datasets_path / config.reference_dataset / "sequences.fasta.db")
+    taxonomy_db = taxonomy.TaxonomyDb(config.datasets_path / config.reference_dataset / "taxonomy.tsv.db")
     samples = []
+    config.datasets = sorted(config.datasets)
+    print(f"Using {len(config.datasets)} dataset(s):", ', '.join(config.datasets))
     for dataset in config.datasets:
-        samples += sample.load_multiplexed_fasta(
-            config.datasets_path / dataset / f"{dataset}.fasta.db",
-            config.datasets_path / dataset / f"{dataset}.fasta.mapping.db",
-            config.datasets_path / dataset / f"{dataset}.fasta.index.db",
-            sample.SampleMode.Natural if config.distribution == "natural" else sample.SampleMode.PresenceAbsence)
-    print(f"Found {len(samples)} samples.")
-    generator_pipeline = [
-        dg.random_fasta_samples(samples),
-        dg.random_sequence_entries(subsample_size=config.max_subsample_size),
-        dg.sequences(length=sequence_length),
-        dg.augment_ambiguous_bases,
-        dg.encode_sequences(),
-        dg.encode_kmers(kmer),
-        lambda encoded_kmer_sequences: (encoded_kmer_sequences,)*2
-    ]
-    train_data = dg.BatchGenerator(
-        config.batch_size,
-        config.steps_per_epoch,
-        generator_pipeline)
-    val_data = dg.BatchGenerator(
-        config.val_batch_size,
-        config.val_steps_per_epoch,
-        generator_pipeline,
+        samples += sequences_db.mappings(config.datasets_path / dataset / f"sequences.{config.reference_model}.{config.reference_dataset}.fasta.mapping.db")
+    print(f"Found {len(samples)} samples/runs.")
+    train_data = model.data_generator(
+        samples,
+        taxonomy_db,
+        subsample_size=config.max_subsample_size,
+        batch_size=config.batch_size,
+        batches_per_epoch=config.steps_per_epoch,
+        shuffle=True)
+    val_data = model.data_generator(
+        samples,
+        taxonomy_db,
+        subsample_size=config.max_subsample_size,
+        batch_size=config.val_batch_size,
+        batches_per_epoch=config.val_steps_per_epoch,
         shuffle=False)
     return train_data, val_data
 
@@ -107,20 +110,14 @@ def main(context: dcs.Context):
     # Training
     if config.train:
         print("Training model...")
-        train_data, val_data = data_generators(
-            config,
-            model.instance.sequence_length,
-            model.instance.kmer)
+        train_data, val_data = data_generators(config, model.instance)
         model.path("model").mkdir(exist_ok=True, parents=True)
-        model.instance(train_data[0][0])
+        model.instance(train_data[0][0]) # Initialize the model
         context.get(dcs.module.Train).fit(
             model.instance,
             train_data,
             validation_data=val_data,
-            callbacks=[
-                tf.keras.callbacks.ModelCheckpoint(filepath=str(model.path("model"))),
-                tf.keras.callbacks.LambdaCallback(on_epoch_end=lambda *_: print(f"\nAverage Batch Generation Time: {train_data.average_batch_generation_time}"))
-            ])
+            accumulation_steps=config.accumulation_steps)
 
     # Artifact logging
     if config.log_artifact is not None:
@@ -137,11 +134,13 @@ if __name__ == "__main__":
     context.use(dcs.module.Train) \
         .optional_training() \
         .use_steps() \
+        .use_gradient_accumulation() \
         .defaults(
             epochs=None,
-            batch_size=16,
+            batch_size=3,
             steps_per_epoch=100,
-            val_steps_per_epoch=20)
+            val_steps_per_epoch=20,
+            val_frequency=20)
     context.use(dcs.module.Rng)
     context.use(dcs.module.Wandb) \
         .resumeable() \
