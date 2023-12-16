@@ -116,7 +116,7 @@ def f1_score(y_true, y_pred):
 @CustomObject
 def positive_predictive_value(y_true, y_pred):
     y_true = tf.cast(y_true, tf.bool)
-    y_pred = tf.cast(y_pred, tf.float32) > 0.5
+    y_pred = tf.cast(y_pred, tf.float32) > 0.5 # type: ignore
 
     tp = true_positives(y_true, y_pred, tf.float32)
     fp = false_positives(y_true, y_pred, tf.float32)
@@ -127,7 +127,7 @@ def positive_predictive_value(y_true, y_pred):
 @CustomObject
 def negative_predictive_value(y_true, y_pred):
     y_true = tf.cast(y_true, tf.bool)
-    y_pred = tf.cast(y_pred, tf.float32) > 0.5
+    y_pred = tf.cast(y_pred, tf.float32) > 0.5 # type: ignore
 
     tn = true_negatives(y_true, y_pred, tf.float32)
     fn = false_negatives(y_true, y_pred, tf.float32)
@@ -135,18 +135,25 @@ def negative_predictive_value(y_true, y_pred):
     return tf.math.divide_no_nan(tn, tn + fn)
 
 
-@CustomObject
-def taxonomy_relative_abundance_accuracy(y_true, y_pred):
-    depth = tf.shape(y_pred)[-1]
-    if tf.rank(y_true) != tf.rank(y_pred):
-        y_true = tf.one_hot(tf.cast(y_true, tf.int64), depth=depth)
-    else:
-        y_true = tf.cast(y_true, tf.float32)
-    total_abundance = tf.cast(tf.shape(y_pred)[-2], tf.float32)
-    y_pred = tf.one_hot(tf.argmax(y_pred, axis=-1), depth)
-    y_pred_correct = tf.math.minimum(y_true, y_pred)
-    correct_abundance = tf.reduce_sum(y_pred_correct, axis=tf.range(1, tf.rank(y_pred_correct)))
-    return correct_abundance / total_abundance
+# @CustomObject
+# def taxonomy_relative_abundance_accuracy(y_true, y_pred):
+#     depth = tf.shape(y_pred)[-1]
+#     if tf.rank(y_true) != tf.rank(y_pred):
+#         y_true = tf.one_hot(tf.cast(y_true, tf.int64), depth=depth)
+#     else:
+#         y_true = tf.cast(y_true, tf.float32)
+#     total_abundance = tf.cast(tf.shape(y_pred)[-2], tf.float32)
+#     y_pred = tf.one_hot(tf.argmax(y_pred, axis=-1), depth)
+#     y_pred_correct = tf.math.minimum(y_true, y_pred)
+#     correct_abundance = tf.reduce_sum(y_pred_correct, axis=tf.range(1, tf.rank(y_pred_correct)))
+#     return correct_abundance / total_abundance
+
+def taxonomy_relative_abundance_distribution_loss(y_true, y_pred):
+    minimum_entropy = tf.keras.losses.categorical_crossentropy(y_true, y_true)
+    return tf.keras.losses.categorical_crossentropy(y_true, y_pred) - minimum_entropy
+
+def taxonomy_relative_abundance_distribution_accuracy(y_true, y_pred):
+    return tf.reduce_sum(tf.math.minimum(y_true, y_pred), axis=1)
 
 
 @CustomObject

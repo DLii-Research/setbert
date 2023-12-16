@@ -4,7 +4,7 @@ import numpy as np
 from scipy.special import softmax
 import tensorflow as tf
 from tqdm import tqdm
-from typing import Generic, TypeVar, TYPE_CHECKING
+from typing import Generic, Optional, TypeVar, TYPE_CHECKING
 
 from .custom_model import ModelWrapper, CustomModel
 from .. import metrics
@@ -33,7 +33,7 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[Mod
     def _prediction_to_taxonomy(self, y_pred, confidence: float):
         raise NotImplementedError()
 
-    def predict(self, *args, confidence: float = 0.7, **kwargs):
+    def predict(self, *args, confidence: Optional[float] = None, **kwargs):
         return self._prediction_to_taxonomy(self.predict_probabilities(*args, **kwargs), confidence)
 
     def predict_probabilities(self, *args, **kwargs):
@@ -113,6 +113,8 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Model
     #     return self.predict_step(x)
 
     def predict_step(self, x):
+        return self(x, training=False)
+
         parent_rank_indices = self._build_parent_rank_indices()
         y_pred = self(x, training=False)
         outputs = (y_pred,)
@@ -127,7 +129,13 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Model
         # return labels, confidence
         return outputs
 
-    def _prediction_to_taxonomy(self, y_pred, confidence_threshold: float):
+    def _prediction_to_taxonomy(self, y_pred, confidence_threshold: Optional[float] = None):
+        if confidence_threshold is None:
+            result = recursive_map(
+                lambda y: self.taxonomy_tree.taxonomy_id_map[-1][y],
+                np.argmax(y_pred, axis=-1))
+            result = ndarray_from_iterable(result)
+            return result, -np.ones_like(result)
         output_shape = y_pred[0].shape[:-1]
         y_pred = tuple(map(lambda y: tf.reshape(y, (-1, y.shape[-1])), y_pred))
         result = []
