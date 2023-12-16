@@ -77,8 +77,11 @@ def data_generators(config: argparse.Namespace, model: SetBertPretrainWithTaxaAb
     sequences_db = fasta.FastaDb(config.datasets_path / config.reference_dataset / "sequences.fasta.db")
     taxonomy_db = taxonomy.TaxonomyDb(config.datasets_path / config.reference_dataset / "taxonomy.tsv.db")
     samples = []
+    config.datasets = sorted(config.datasets)
+    print(f"Using {len(config.datasets)} dataset(s):", ', '.join(config.datasets))
     for dataset in config.datasets:
         samples += sequences_db.mappings(config.datasets_path / dataset / f"sequences.{config.reference_model}.{config.reference_dataset}.fasta.mapping.db")
+    print(f"Found {len(samples)} samples/runs.")
     train_data = model.data_generator(
         samples,
         taxonomy_db,

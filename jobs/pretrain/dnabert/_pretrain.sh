@@ -31,8 +31,8 @@ ${command_prefix} ${python_tf} ./scripts/pretraining/pretrain_dnabert.py \
     ${@:2}
 
 # Remove data from scratch
-echo "Clearing scratch..."
 if [ ! -z "${scratch_path}" ]; then
+    echo "Clearing scratch..."
     rm -rf "${scratch_path}/${run_id}"
 fi
 echo "Done."
