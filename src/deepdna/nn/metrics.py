@@ -148,12 +148,10 @@ def negative_predictive_value(y_true, y_pred):
 #     correct_abundance = tf.reduce_sum(y_pred_correct, axis=tf.range(1, tf.rank(y_pred_correct)))
 #     return correct_abundance / total_abundance
 
+@CustomObject
 def taxonomy_relative_abundance_distribution_loss(y_true, y_pred):
     minimum_entropy = tf.keras.losses.categorical_crossentropy(y_true, y_true)
     return tf.keras.losses.categorical_crossentropy(y_true, y_pred) - minimum_entropy
-
-def taxonomy_relative_abundance_distribution_accuracy(y_true, y_pred):
-    return tf.reduce_sum(tf.math.minimum(y_true, y_pred), axis=1)
 
 
 @CustomObject
