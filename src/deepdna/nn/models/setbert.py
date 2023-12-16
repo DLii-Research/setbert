@@ -2,7 +2,7 @@ from dnadb import taxonomy
 from dnadb.sample import ISample
 import numpy as np
 import tensorflow as tf
-from typing import Iterable, Optional, TypedDict
+from typing import Iterable, Optional
 
 from .dnabert import DnaBertEncoderModel
 from .transformer import AttentionScoreProvider, SetTransformerModel
@@ -226,7 +226,9 @@ class SetBertPretrainWithTaxaAbundanceDistributionModel(ModelWrapper, CustomMode
         self.set_components(
             base=base,
             mask_layer=layers.SetMaskEmbedding(base.embed_dim),
-            embed_layer=layers.ChunkedEmbeddingLayer(base.dnabert_encoder))
+            embed_layer=layers.ChunkedEmbeddingLayer(
+                base.dnabert_encoder,
+                stop_gradient=freeze_sequence_embeddings))
 
     def build_model(self):
         y = x = tf.keras.layers.Input((None, self.base.dnabert_encoder.input_shape[-1]))
