@@ -7,7 +7,7 @@ import pandas as pd
 from pathlib import Path
 from deepdna.nn import data_generators as dg
 from deepdna.nn.models import load_model
-from deepdna.nn.models.setbert import SetBertPretrainModel, SetBertHoplandBulkRhizosphereClassifierModel
+from deepdna.nn.models.setbert import SetBertPretrainWithTaxaAbundanceDistributionModel, SetBertHoplandBulkRhizosphereClassifierModel
 
 
 class PersistentSetBertHoplandModel(dcs.module.Wandb.PersistentObject[SetBertHoplandBulkRhizosphereClassifierModel]):
@@ -15,7 +15,7 @@ class PersistentSetBertHoplandModel(dcs.module.Wandb.PersistentObject[SetBertHop
         # Create the model
         wandb = self.context.get(dcs.module.Wandb)
         setbert_pretrain_path = wandb.artifact_argument_path("setbert_pretrain")
-        setbert_base = load_model(setbert_pretrain_path, SetBertPretrainModel).base
+        setbert_base = load_model(setbert_pretrain_path, SetBertPretrainWithTaxaAbundanceDistributionModel).base
         model = SetBertHoplandBulkRhizosphereClassifierModel(setbert_base, config.freeze_sequence_embeddings)
         model.compile(optimizer=tf.keras.optimizers.Adam(config.lr))
         return model
