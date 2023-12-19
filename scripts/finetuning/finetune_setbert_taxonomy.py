@@ -255,6 +255,8 @@ if __name__ == "__main__":
             val_steps_per_epoch=20,
             val_frequency=20)
     context.use(dcs.module.Rng)
-    context.use(dcs.module.Wandb).resumeable()
+    context.use(dcs.module.Wandb) \
+        .resumeable() \
+        .defaults(project="taxonomy-classification")
     define_arguments(context)
     context.execute()

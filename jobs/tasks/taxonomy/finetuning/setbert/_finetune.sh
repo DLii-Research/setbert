@@ -95,7 +95,7 @@ if [ ! -z "${val_dataset_dirs}" ]; then
 fi
 
 ${command_prefix} ${python_tf} ./scripts/finetuning/finetune_setbert_taxonomy.py \
-    --wandb-name "${reference_model}-${reference_dataset}-64d-150l" \
+    --wandb-name "${dataset-names}-${reference_model}-${reference_dataset}-64d-150l" \
     --datasets-path ${datasets_path} \
     --datasets ${train_dataset_dirs[@]} \
     --reference-dataset ${datasets[${reference_dataset}]} \
