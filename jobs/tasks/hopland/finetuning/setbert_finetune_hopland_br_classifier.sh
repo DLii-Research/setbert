@@ -14,7 +14,7 @@ if [ ! -z "${scratch_path}" ]; then
     datasets_path="${scratch_path}/${run_id}/datasets"
 fi
 
-${command_prefix} ${python_tf} ./scripts/finetuning/setbert_finetune_hopland_br_classifier.py \
+${command_prefix} ${python_tf} ./scripts/finetuning/finetune_setbert_hopland_br_classifier.py \
     --wandb-name setbert-hopland-br-classifier-64d-150l \
     --wandb-project hopland \
     --setbert-pretrain-artifact ${setbert_pretrain_artifacts[qiime-silva-nr99-filtered-515f-806r]} \
