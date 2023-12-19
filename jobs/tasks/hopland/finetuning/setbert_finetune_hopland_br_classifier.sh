@@ -8,9 +8,10 @@ dataset_dir=${datasets[hopland]}
 # Copy data to scratch
 run_id=$$-$(date +%s%3N)
 if [ ! -z "${scratch_path}" ]; then
-    echo "Copying datasets to scratch path..."
-    mkdir -p "${scratch_path}/${run_id}/datasets"
-    cp -R "${datasets_path}/${dataset_dir}" "${scratch_path}/${run_id}/datasets"
+    echo "Copying dataset to scratch path..."
+    mkdir -p "${scratch_path}/${run_id}/datasets/${dataset_dir}"
+    cp -vR "${datasets_path}/${dataset_dir}/sequences.fasta.db" "${scratch_path}/${run_id}/datasets/${dataset_dir}"
+    cp -vR "${datasets_path}/${dataset_dir}/sequences.fasta.mapping.db" "${scratch_path}/${run_id}/datasets/${dataset_dir}"
     datasets_path="${scratch_path}/${run_id}/datasets"
 fi
 
