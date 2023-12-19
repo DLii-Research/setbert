@@ -73,7 +73,8 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--log-artifact", type=str, default=None, help="Log the model as a W&B artifact.")
 
 
-def data_generators(config: argparse.Namespace, model: SetBertPretrainWithTaxaAbundanceDistributionModel):
+def data_generators(context: dcs.Context, model: SetBertPretrainWithTaxaAbundanceDistributionModel):
+    config = context.config
     sequences_db = fasta.FastaDb(config.datasets_path / config.reference_dataset / "sequences.fasta.db")
     taxonomy_db = taxonomy.TaxonomyDb(config.datasets_path / config.reference_dataset / "taxonomy.tsv.db")
     samples = []
@@ -82,12 +83,13 @@ def data_generators(config: argparse.Namespace, model: SetBertPretrainWithTaxaAb
     for dataset in config.datasets:
         samples += sequences_db.mappings(config.datasets_path / dataset / f"sequences.{config.reference_model}.{config.reference_dataset}.fasta.mapping.db")
     print(f"Found {len(samples)} samples/runs.")
+    training = context.get(dcs.module.Train)
     train_data = model.data_generator(
         samples,
         taxonomy_db,
         subsample_size=config.max_subsample_size,
-        batch_size=config.batch_size,
-        batches_per_epoch=config.steps_per_epoch,
+        batch_size=training.batch_size,
+        batches_per_epoch=training.steps_per_epoch,
         shuffle=True)
     val_data = model.data_generator(
         samples,
@@ -110,9 +112,8 @@ def main(context: dcs.Context):
     # Training
     if config.train:
         print("Training model...")
-        train_data, val_data = data_generators(config, model.instance)
+        train_data, val_data = data_generators(context, model.instance)
         model.path("model").mkdir(exist_ok=True, parents=True)
-        model.instance(train_data[0][0]) # Initialize the model
         context.get(dcs.module.Train).fit(
             model.instance,
             train_data,

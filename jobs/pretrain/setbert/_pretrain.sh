@@ -63,6 +63,7 @@ if [ ! -z "${scratch_path}" ]; then
     for dataset_name in ${dataset_names//,/ }; do
         copy_dataset_mapping_to_scratch ${dataset_name} ${reference_dataset} ${reference_model}
     done
+    datasets_path="${scratch_path}/${run_id}/datasets"
 fi
 
 # map each dataset in ${datasets} through $datasets to get the directory, and join by spaces

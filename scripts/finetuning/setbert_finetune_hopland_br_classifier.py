@@ -1,5 +1,5 @@
 import argparse
-from dnadb import sample
+from dnadb import fasta
 import deepctx.scripting as dcs
 from deepctx.lazy import tensorflow as tf
 import numpy as np
@@ -53,11 +53,8 @@ def define_arguments(context: dcs.Context):
 
 def data_generators(context: dcs.Context, sequence_length: int, kmer: int):
     config = context.config
-    samples = [s for s in sample.load_multiplexed_fasta(
-        config.hopland_dataset_path / f"{config.hopland_dataset_path.name}.fasta.db",
-        config.hopland_dataset_path / f"{config.hopland_dataset_path.name}.fasta.mapping.db",
-        config.hopland_dataset_path / f"{config.hopland_dataset_path.name}.fasta.index.db"
-    )]
+    fasta_db = fasta.FastaDb(config.hopland_dataset_path / "sequences.fasta.db")
+    samples = fasta_db.mappings(config.hopland_dataset_path / "sequences.fasta.mapping.db")
     targets = {s.name: ('-R-' in s.name) for s in samples}
     num_rhizosphere = sum(targets.values())
     num_bulk = len(targets) - num_rhizosphere
@@ -65,10 +62,10 @@ def data_generators(context: dcs.Context, sequence_length: int, kmer: int):
     print(f"# Bulk samples: {num_bulk:,}, # Rhizosphere samples: {num_rhizosphere:,}")
 
     generator_pipeline = [
-        dg.random_fasta_samples(samples),
+        dg.random_samples(samples),
         dg.random_sequence_entries(subsample_size=config.subsample_size),
         dg.sequences(length=sequence_length),
-        dg.augment_ambiguous_bases,
+        dg.augment_ambiguous_bases(),
         dg.encode_sequences(),
         dg.encode_kmers(kmer),
         lambda samples: dict(targets=np.array([targets[s.name] for s in samples])),
