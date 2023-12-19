@@ -12,8 +12,17 @@ val_dataset_names=$2
 reference_dataset=$3
 reference_model=$4
 
+echo "Validation dataset names"
+echo "'${val_dataset_names}'"
+
 # join train and val dataset names by comma
-dataset_names="${train_dataset_names},${val_dataset_names}"
+if [ ! -z ${val_dataset_names} ]; then
+    echo "Concatenating train and val dataset names"
+    dataset_names="${train_dataset_names},${val_dataset_names}"
+else
+    echo "Using only train dataset names"
+    dataset_names="${train_dataset_names}"
+fi
 
 # Check if dataset_name is a key of the datasets dictionary
 if [ -z "${dataset_names}" ]; then
@@ -38,7 +47,7 @@ function copy_dataset_mapping_to_scratch() {
     local reference_dataset=$2
     local reference_model=$3
     local dataset_dir=${datasets[${dataset_name}]}
-    mkdir "${scratch_path}/${run_id}/datasets/${dataset_dir}"
+    mkdir -p "${scratch_path}/${run_id}/datasets/${dataset_dir}"
     echo "${datasets_path}/${dataset_dir} -> ${scratch_path}/${run_id}/datasets"
     cp -R \
         "${datasets_path}/${dataset_dir}/sequences.${reference_model}.${datasets[${reference_dataset}]}.fasta.mapping.db" \
@@ -48,7 +57,7 @@ function copy_dataset_mapping_to_scratch() {
 function copy_reference_dataset_to_scratch() {
     local reference_dataset=$1
     local dataset_dir=${datasets[${reference_dataset}]}
-    mkdir "${scratch_path}/${run_id}/datasets/${dataset_dir}"
+    mkdir -p "${scratch_path}/${run_id}/datasets/${dataset_dir}"
     echo "${datasets_path}/${dataset_dir} -> ${scratch_path}/${run_id}/datasets"
     for f in "sequences.fasta.db" "taxonomy.tsv.db"; do
         cp -R "${datasets_path}/${dataset_dir}/${f}" "${scratch_path}/${run_id}/datasets/${dataset_dir}/"
@@ -78,14 +87,20 @@ for dataset_name in ${val_dataset_names//,/ }; do
     val_dataset_dirs+=(${datasets[${dataset_name}]})
 done
 
+extra_command_args=()
+# if val_dataset_dirs is not empty, then add --val-datasets to extra command args
+if [ ! -z "${val_dataset_dirs}" ]; then
+    extra_command_args+=("--val-datasets ${val_dataset_dirs[@]}")
+fi
+
 ${command_prefix} ${python_tf} ./scripts/finetuning/finetune_setbert_taxonomy.py \
     --wandb-name "${reference_model}-${reference_dataset}-64d-150l" \
     --datasets-path ${datasets_path} \
     --datasets ${train_dataset_dirs[@]} \
-    --val-datasets ${val_dataset_dirs[@]} \
     --reference-dataset ${datasets[${reference_dataset}]} \
     --reference-model ${reference_model} \
     --model-type ${reference_model} \
+    ${extra_command_args[@]} \
     ${@:5}
 
 # Remove data from scratch
