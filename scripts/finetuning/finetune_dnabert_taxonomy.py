@@ -3,9 +3,7 @@ import deepctx.scripting as dcs
 from deepctx.lazy import tensorflow as tf
 from dnadb import fasta, taxonomy
 from pathlib import Path
-from typing import cast, Type
 
-from deepdna.data.samplers import TaxonomyDbSampler
 from deepdna.nn import data_generators as dg
 from deepdna.nn.models import dnabert, load_model
 from deepdna.nn.models import taxonomy as taxonomy_models
