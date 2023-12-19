@@ -72,7 +72,7 @@ for dataset_name in ${dataset_names//,/ }; do
     dataset_dirs+=(${datasets[${dataset_name}]})
 done
 
-${command_prefix} ${python_tf} ./scripts/pretraining/setbert_pretrain.py \
+${command_prefix} ${python_tf} ./scripts/pretraining/pretrain_setbert.py \
     --wandb-name "${reference_model}-${reference_dataset}-64d-150l" \
     --wandb-project setbert-pretrain \
     --dnabert-pretrain-artifact ${dnabert_pretrain_artifacts[${reference_dataset}]} \
