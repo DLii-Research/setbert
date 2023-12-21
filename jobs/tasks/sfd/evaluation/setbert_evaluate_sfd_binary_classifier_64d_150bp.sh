@@ -19,7 +19,7 @@ fi
 ${command_prefix} ${python_tf} ./scripts/evaluation/setbert_evaluate_sfd_classifier.py \
     --sfd-dataset-path "${datasets_path}/${dataset_dir}" \
     --output-path "${log_path}/sfd/attribution/topdown" \
-    --model-artifact ${setbert_sfd_artifacts[topdown-silva-nr99-filtered-515f-806r]} \
+    --model-artifact "${setbert_sfd_artifacts[topdown-silva-nr99-filtered-515f-806r]}" \
     $@
 
 # Remove data from scratch
