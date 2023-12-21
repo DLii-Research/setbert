@@ -79,6 +79,31 @@ class BatchGenerator(tf.keras.utils.Sequence, Generic[IOType]):
         return self.batches_per_epoch
 
 
+def from_sample(
+    sample: sample.ISample,
+    shape: Optional[Union[int, Tuple[int, ...]]] = None,
+):
+    """
+    Draw random samples from the given list of samples with replacement.
+
+    Outputs:
+        samples: The samples
+    """
+    samples = [sample]
+    if shape is None:
+        shape = ()
+    elif isinstance(shape, int):
+        shape = (shape,)
+
+    # Number of samples per batch element
+    n = np.product(shape or 1)
+
+    # Convert to numpy array
+    samples = ndarray_from_iterable(list(samples))
+
+    return lambda batch_size: dict(samples=np.repeat(samples, batch_size*n).reshape((batch_size, *shape)))
+
+
 def random_samples(
     samples: Union[sample.ISample, Iterable[sample.ISample]],
     shape: Optional[Union[int, Tuple[int, ...]]] = None,
@@ -141,6 +166,18 @@ def random_sequence_entries(
         else:
             return lambda samples, np_rng: dict(sequence_entries=recursive_map(lambda s: s.sample(subsample_size, rng=np_rng), samples))
     return factory
+
+
+def sequence_ids():
+    """
+    Retrieve the sequence IDs from the available sequence entries.
+
+    Inputs:
+        sequence_entries: list of sequence entries
+    Outputs:
+        sequence_ids: The sequence IDs
+    """
+    return lambda sequence_entries: dict(sequence_ids=recursive_map(lambda s: s.identifier, sequence_entries))
 
 
 def sequences(
