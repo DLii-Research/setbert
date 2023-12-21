@@ -20,6 +20,7 @@ def define_arguments(context: dcs.Context):
     group = parser.add_argument_group("Data Settings")
     group.add_argument("--sfd-dataset-path", type=Path, required=True, help="The path to the SFD dataset.")
     group.add_argument("--output-path", type=Path, required=True, help="The path to save the results to.")
+    group.add_argument("--slice", type=str, default=None, help="The slice of the dataset samples to use given in Python slice synthax. For example, '0:100' will use the first 100 samples.")
 
     wandb = context.get(dcs.module.Wandb)
     wandb.add_artifact_argument("model", required=True, description="The SFD classification model to use.")
@@ -34,6 +35,9 @@ def main(context: dcs.Context):
     sequences_db = fasta.FastaDb(config.sfd_dataset_path / "sequences.fasta.db")
     samples = sequences_db.mappings(config.sfd_dataset_path / "sequences.fasta.mapping.db")
     samples = sorted([s for s in samples if s.name in targets], key=lambda s: s.name)
+    if config.slice is not None:
+        samples = eval(f"samples[{config.slice}]")
+        print("Using slice:", config.slice)
     print("Found", len(samples), "samples.")
 
     print("Loading model...")
