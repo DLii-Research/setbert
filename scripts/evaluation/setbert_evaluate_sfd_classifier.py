@@ -5,99 +5,97 @@ This script computes the sample embedding representation for each sample using b
 and fine-tuned models, the classification prediction, and the attention scores for each sample.
 """
 import deepctx.scripting as dcs
-from deepctx.lazy import tensorflow as tf
-from dnadb import dna, fasta
+from dnadb import fasta
 import numpy as np
 from pathlib import Path
 import pandas as pd
-from tqdm import tqdm
+from tqdm import tqdm, trange
+
+from deepdna.nn import data_generators as dg
+from deepdna.nn.models import load_model, setbert
 
 
 def define_arguments(context: dcs.Context):
     parser = context.argument_parser
-    parser.add_argument("--output-path", type=Path, required=True, help="The path to the output directory.")
-    parser.add_argument("--overwrite", default=False, action="store_true", help="Overwrite existing output files.")
-
-    group = parser.add_argument_group("Dataset Settings")
-    group.add_argument("--sfd-dataset-path", type=Path, required=True, help="The path to the SFD dataset directory.")
-    group.add_argument("--chunk-size", type=int, default=None, help="The chunk size to use for evaluation.")
+    group = parser.add_argument_group("Data Settings")
+    group.add_argument("--sfd-dataset-path", type=Path, required=True, help="The path to the SFD dataset.")
+    group.add_argument("--output-path", type=Path, required=True, help="The path to save the results to.")
 
     wandb = context.get(dcs.module.Wandb)
-    wandb.add_artifact_argument("pretrain-model", required=True)
-    wandb.add_artifact_argument("finetune-model", required=True)
-
-
-def build_evaluation_model(context: dcs.Context):
-    """
-    Note: This function assumes an architecture of: input -> setbert_encoder -> dense(1).
-          For a more complicated model, a custom model type should be created.
-    """
-    from deepdna.nn.models import load_model, setbert
-
-    wandb = context.get(dcs.module.Wandb)
-
-    print("Loading pre-trained model")
-    pretrain_base = load_model(wandb.artifact_argument_path("pretrain_model"), setbert.SetBertPretrainModel).base
-
-    print("Loading fine-tuned model")
-    finetune_model = load_model(wandb.artifact_argument_path("finetune_model"), setbert.SetBertSfdClassifierModel)
-
-    pretrain_encoder = setbert.SetBertEncoderModel(
-        pretrain_base,
-        compute_sequence_embeddings=True)
-    finetune_encoder = setbert.SetBertEncoderModel(
-        finetune_model.model.layers[-2].base,
-        compute_sequence_embeddings=True)
-
-    dense = finetune_model.model.layers[-1]
-    assert isinstance(dense, tf.keras.layers.Dense)
-    y = x = tf.keras.layers.Input(pretrain_encoder.input_shape[1:])
-    pretrain_embeddings, pretrain_scores = pretrain_encoder(y, return_attention_scores=True)
-    finetune_embeddings, finetune_scores = finetune_encoder(y, return_attention_scores=True)
-    y = dense(finetune_embeddings)
-    model = tf.keras.Model(x, (y, pretrain_embeddings, finetune_embeddings, pretrain_scores, finetune_scores))
-
-    pretrain_encoder.chunk_size = context.config.chunk_size
-    finetune_encoder.chunk_size = context.config.chunk_size
-
-    return pretrain_encoder.kmer, model
+    wandb.add_artifact_argument("model", required=True, description="The SFD classification model to use.")
 
 
 def main(context: dcs.Context):
     config = context.config
 
-    metadata = pd.read_csv(config.sfd_dataset_path / f"{config.sfd_dataset_path.name}.metadata.csv")
-    sample_names = sorted(metadata["swab_label"])
+    metadata = pd.read_csv(config.sfd_dataset_path / "metadata.csv")
+    targets = {row["swab_label"]: row["oo_present"] for _, row in metadata.iterrows()}
 
-    input_path: Path = config.sfd_dataset_path / "test"
-    config.output_path.mkdir(exist_ok=True)
+    sequences_db = fasta.FastaDb(config.sfd_dataset_path / "sequences.fasta.db")
+    samples = sequences_db.mappings(config.sfd_dataset_path / "sequences.fasta.mapping.db")
+    samples = sorted([s for s in samples if s.name in targets], key=lambda s: s.name)
+    print("Found", len(samples), "samples.")
 
-    kmer, model = build_evaluation_model(context)
+    print("Loading model...")
+    wandb = context.get(dcs.module.Wandb)
+    path = wandb.artifact_argument_path("model")
+    model = load_model(path, setbert.SetBertSfdClassifierModel)
 
-    for sample_name in tqdm(sample_names):
-        if not context.is_running:
-            break
-        for fasta_file in tqdm(sorted(input_path.glob(f"{sample_name}.*.fasta")), leave=False):
-            if not context.is_running:
-                break
-            output_file = config.output_path / fasta_file.with_suffix(".npz").name
-            if not config.overwrite and output_file.exists():
-                continue
-            with open(fasta_file) as f:
-                sequences = list(map(lambda e: dna.encode_sequence(e.sequence), fasta.read(f)))
-                sequences = dna.encode_kmers(np.array(sequences), kmer)
-            result, pretrain_embedding, finetune_embedding, pretrain_scores, finetune_scores = model(np.expand_dims(sequences, 0))
-            pretrain_embedding = np.array(pretrain_embedding).flatten()
-            finetune_embedding = np.array(finetune_embedding).flatten()
-            pretrain_scores = tf.reduce_sum(tf.concat(pretrain_scores, axis=0), axis=1)
-            finetune_scores = tf.reduce_sum(tf.concat(finetune_scores, axis=0), axis=1)
-            shift_scores = finetune_scores - pretrain_scores
-            np.savez(
-                output_file,
-                result=result.numpy().flatten()[0],
-                pretrain_embedding=pretrain_embedding,
-                finetune_embedding=finetune_embedding,
-                shift_scores=shift_scores.numpy())
+    print("Building attribution model...")
+    attribution = model.make_attribution_model()
+
+    output_path = Path(config.output_path)
+    output_path.mkdir(exist_ok=True, parents=True)
+
+    for s in tqdm(samples, desc="Evaluating samples"):
+        if (output_path / f"{s.name}.npz").exists():
+            continue
+        is_present = targets[s.name]
+
+        sample_sequences = []
+        sample_fasta_ids = []
+        sample_scores = []
+        sample_distance_deltas = []
+        sample_embeddings = []
+        sample_predictions = []
+        for _ in trange(10, desc=f"{s.name}", leave=False):
+            sequences, fasta_ids = dg.BatchGenerator(1, 1, [
+                dg.from_sample(s),
+                dg.random_sequence_entries(1000),
+                dg.sequences(150),
+                dg.encode_sequences(),
+                dg.augment_ambiguous_bases(),
+                dg.encode_kmers(3),
+                lambda encoded_kmer_sequences, sequence_entries: (encoded_kmer_sequences, dg.recursive_map(lambda e: e.identifier, sequence_entries))
+            ])[0]
+            attr_scores = attribution(sequences)[0] # type: ignore
+            attr_scores = np.sum(attr_scores, axis=1) # Sum across heads
+            attr_scores /= np.max(attr_scores, axis=(1, 2), keepdims=True) # Normalize with respect to max
+            sum_scores = np.sum(attr_scores[:,1:,1:], axis=(0, 1))
+
+            y1, sample_embedding = model(sequences)
+            y1 = y1.numpy().flatten()[0]
+            y2_min = model(np.delete(sequences, np.argmin(sum_scores), axis=1))[0].numpy().flatten()[0]
+            y2_max = model(np.delete(sequences, np.argmax(sum_scores), axis=1))[0].numpy().flatten()[0]
+
+            delta_min, delta_max = np.abs(is_present - np.array((y2_min, y2_max))) - np.abs(is_present - y1)
+
+            sample_sequences.append(sequences[0])
+            sample_fasta_ids.append(fasta_ids[0])
+            sample_scores.append(attr_scores)
+            sample_distance_deltas.append((delta_min, delta_max))
+            sample_embeddings.append(sample_embedding)
+            sample_predictions.append(y1)
+
+        np.savez(
+            output_path / f"{s.name}.npz",
+            sequences=np.array(sample_sequences),
+            fasta_ids=np.array(sample_fasta_ids),
+            scores=np.array(sample_scores),
+            embeddings=np.array(sample_embeddings),
+            predictions=sample_predictions,
+            distance_deltas=sample_distance_deltas)
+
 
 if __name__ == "__main__":
     context = dcs.Context(main)
