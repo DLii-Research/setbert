@@ -442,8 +442,9 @@ class SetBertSfdClassifierModel(AttentionScoreProvider, ModelWrapper, CustomMode
 
     def _build_model(self, encoder, return_scores):
         y = x = tf.keras.layers.Input(encoder.input_shape[1:])
-        y, scores = encoder(y, return_attention_scores=True)
-        y = self.output_dense(y)
+        embedding, scores = encoder(y, return_attention_scores=True)
+        y = self.output_dense(embedding)
+        y = (y, embedding)
         y = (y, scores) if return_scores else y
         return tf.keras.Model(x, y)
 
@@ -460,7 +461,8 @@ class SetBertSfdClassifierModel(AttentionScoreProvider, ModelWrapper, CustomMode
         _compute_attention_attribution = attention_attribution.attention_attribution_factory(
             sample_encoder,
             next(find_layers(sample_encoder, SetTransformerModel)),
-            integration_steps=integration_steps)
+            integration_steps=integration_steps,
+            y_for_gradient=lambda y: y[0])
         @tf.function()
         def compute_attention_attribution(inputs):
             # return sequence_encoder(inputs)
@@ -469,16 +471,21 @@ class SetBertSfdClassifierModel(AttentionScoreProvider, ModelWrapper, CustomMode
 
 
     def default_loss(self):
-        return tf.keras.losses.BinaryCrossentropy(from_logits=False)
+        return [
+            tf.keras.losses.BinaryCrossentropy(from_logits=False),
+            None
+        ]
 
     def default_metrics(self):
-        return [
-            tf.keras.metrics.BinaryAccuracy(),
-            tf.keras.metrics.Precision(name="precision_ppv"),
-            tf.keras.metrics.Recall(),
-            metrics.f1_score,
-            metrics.negative_predictive_value
-        ]
+        return {
+            "fungus_present": [
+                tf.keras.metrics.BinaryAccuracy(),
+                tf.keras.metrics.Precision(name="precision_ppv"),
+                tf.keras.metrics.Recall(),
+                metrics.f1_score,
+                metrics.negative_predictive_value
+            ]
+        }
 
     @property
     def chunk_size(self):
