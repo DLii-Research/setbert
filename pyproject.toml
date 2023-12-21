@@ -12,10 +12,10 @@ dependencies = [
   "lmdbm-lockable == 0.0.5",
   "deepctx == 0.0.19",
   "dnadb == 0.11.0",
-  "numba == 0.55.2",
+  "numba >= 0.55.2",
   "tensorflow >= 2.9.0 <= 2.10",
   "tf-settransformer == 0.2.6",
-  "wandb == 0.15.10"
+  "wandb >= 0.15.10"
 ]
 
 [project.urls]
