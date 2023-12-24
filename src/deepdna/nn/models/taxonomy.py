@@ -1,10 +1,9 @@
 import abc
-from dnadb import taxonomy
+from dataclasses import dataclass
+from dnadb.taxonomy import RANKS, TaxonomyTree
 import numpy as np
-from scipy.special import softmax
 import tensorflow as tf
-from tqdm import tqdm
-from typing import Generic, Optional, TypeVar, TYPE_CHECKING
+from typing import List, Tuple, Generic, Optional, TypeVar, TYPE_CHECKING
 
 from .custom_model import ModelWrapper, CustomModel
 from .. import metrics
@@ -16,12 +15,30 @@ if TYPE_CHECKING:
 
 ModelType = TypeVar("ModelType", bound="keras.Model")
 
+class TaxonomyPrediction(abc.ABC):
+    """
+    A serializable taxonomy prediction container.
+    """
+    @classmethod
+    @abc.abstractclassmethod
+    def deserialize(cls, data: bytes, taxonomy_tree: TaxonomyTree):
+        return NotImplemented
+
+    @abc.abstractmethod
+    def serialize(self) -> bytes:
+        return NotImplemented
+
+    @abc.abstractmethod
+    def constrained_taxonomy(self, confidence: float) -> Tuple[Optional[TaxonomyTree.Taxon], float]:
+        return NotImplemented
+
+
 class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelType]):
 
     base: ModelType
-    taxonomy_tree: taxonomy.TaxonomyTree
+    taxonomy_tree: TaxonomyTree
 
-    def __init__(self, base: ModelType, taxonomy_tree: taxonomy.TaxonomyTree, **kwargs):
+    def __init__(self, base: ModelType, taxonomy_tree: TaxonomyTree, **kwargs):
         super().__init__(**kwargs)
         self.set_components(base=base)
         self.taxonomy_tree = taxonomy_tree
@@ -29,15 +46,21 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[Mod
     def default_loss(self):
         return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False, name="loss")
 
-    @abc.abstractmethod
-    def _prediction_to_taxonomy(self, y_pred, confidence: float):
-        raise NotImplementedError()
-
-    def predict(self, *args, confidence: Optional[float] = None, **kwargs):
-        return self._prediction_to_taxonomy(self.predict_probabilities(*args, **kwargs), confidence)
+    def predict(self, *args, **kwargs):
+        return self.assign_taxonomies(self.predict_probabilities(*args, **kwargs))
 
     def predict_probabilities(self, *args, **kwargs):
+        """
+        Predict the probabilities for each taxonomic level.
+        """
         return super().predict(*args, **kwargs)
+
+    @abc.abstractmethod
+    def assign_taxonomies(self, probabilities) -> np.ndarray:
+        """
+        Assign taxonomic labels, returning TaxonomyPrediction results.
+        """
+        raise NotImplementedError()
 
     def get_config(self):
         return {
@@ -48,12 +71,38 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[Mod
 
     @classmethod
     def from_config(cls, config):
-        config["taxonomy_tree"] = taxonomy.TaxonomyTree.deserialize(config["taxonomy_tree"])
+        config["taxonomy_tree"] = TaxonomyTree.deserialize(config["taxonomy_tree"])
         return super().from_config(config)
 
 
 @CustomObject
 class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[ModelType]):
+
+    @dataclass
+    class NaiveTaxonomyPrediction(TaxonomyPrediction):
+        taxonomy: TaxonomyTree.Taxon
+        confidence: np.ndarray
+
+        @classmethod
+        def deserialize(cls, data: bytes, taxonomy_tree: TaxonomyTree):
+            taxonomy = np.frombuffer(data, count=1, dtype=np.int32)[0]
+            confidence = np.frombuffer(data, offset=4, dtype=np.float32)
+            return cls(taxonomy_tree.taxonomy_id_map[-1][taxonomy], confidence)
+
+        def constrained_taxonomy(self, confidence: float) -> Tuple[Optional[TaxonomyTree.Taxon], float]:
+            """
+            Return the label with confidence greater than or equal to the given confidence.
+            """
+            result = self.taxonomy
+            while result.rank > -1 and self.confidence[result.rank] < confidence:
+                result = result.parent
+            if result.rank == -1:
+                return None, 1.0 - self.confidence[0]
+            return result, self.confidence[result.rank]
+
+        def serialize(self) -> bytes:
+            return np.int32(self.taxonomy.taxonomy_id).tobytes() + self.confidence.astype(np.float32).tobytes()
+
     def build_model(self):
         x = self.base.input
         y = self.base.output
@@ -62,7 +111,7 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Model
 
     def default_metrics(self):
         metric_list = []
-        for rank, name in enumerate(taxonomy.RANKS[:self.taxonomy_tree.depth]):
+        for rank, name in enumerate(RANKS[:self.taxonomy_tree.depth]):
             metric_list.append(
                 metrics.TaxonomyRankAccuracy(
                     self.taxonomy_tree,
@@ -83,100 +132,23 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Model
             #         name=f"{name.lower()}_recall"))
         return metric_list
 
-    def _build_parent_rank_indices(self):
-        if hasattr(self, "_parent_rank_indices"):
-            return self._parent_rank_indices
-        self._parent_rank_indices = {}
-        for rank in range(0, self.taxonomy_tree.depth - 1):
-            i = []
-            for t in self.taxonomy_tree.taxonomy_id_map[rank+1]:
-                if t.taxonomy_ids[rank] >= len(i):
-                    i.append([])
-                i[-1].append(t.taxonomy_id)
-            self._parent_rank_indices[rank] = tf.ragged.constant(i)
-        return self._parent_rank_indices
+    def assign_taxonomies(self, probabilities: np.ndarray):
+        shape = probabilities.shape[:-1]
+        probabilities = probabilities.reshape((-1, probabilities.shape[-1]))
+        predictions = ndarray_from_iterable(tuple(map(self._assign_taxonomy, probabilities)))
+        return predictions.reshape(shape)
 
-    # @tf.function
-    # def _compute_rank_predictions(self, y_pred) -> tuple[tf.Tensor, tf.Tensor]:
-    #     # Predict taxonomy ID for each rank given y_pred=genus, along with confidence
-    #     parent_rank_indices = self._build_parent_rank_indices()
-    #     labels = [tf.argmax(y_pred, axis=-1)]
-    #     confidence = [tf.gather(y_pred, labels[-1], batch_dims=1, axis=-1)]
-    #     for rank in range(len(parent_rank_indices)-1, -1, -1):
-    #         y_pred = tf.reduce_sum(tf.gather(y_pred, parent_rank_indices[rank], batch_dims=0, axis=-1), axis=-1).to_tensor()
-    #         labels.append(tf.argmax(y_pred, axis=-1))
-    #         confidence.append(tf.gather(y_pred, labels[-1], batch_dims=1, axis=-1))
-    #     return tf.stack(labels[::-1], axis=1), tf.stack(confidence[::-1], axis=1)
-
-    # @tf.function
-    # def predict_batch(self, x):
-    #     return self.predict_step(x)
-
-    def predict_step(self, x):
-        return self(x, training=False)
-
-        parent_rank_indices = self._build_parent_rank_indices()
-        y_pred = self(x, training=False)
-        outputs = (y_pred,)
-        # labels = [tf.argmax(y_pred, axis=-1)]
-        # confidence = [tf.gather(y_pred, labels[-1], batch_dims=1, axis=-1)]
-        for rank in range(len(parent_rank_indices)-1, -1, -1):
-            y_pred = tf.reduce_sum(tf.gather(y_pred, parent_rank_indices[rank], batch_dims=0, axis=-1), axis=-1).to_tensor()
-            outputs = (y_pred,) + outputs
-            # labels.append(tf.argmax(y_pred, axis=-1))
-            # confidence.append(tf.gather(y_pred, labels[-1], batch_dims=1, axis=-1))
-        # labels, confidence = tf.stack(labels[::-1], axis=1), tf.stack(confidence[::-1], axis=1)
-        # return labels, confidence
-        return outputs
-
-    def _prediction_to_taxonomy(self, y_pred, confidence_threshold: Optional[float] = None):
-        if confidence_threshold is None:
-            result = recursive_map(
-                lambda y: self.taxonomy_tree.taxonomy_id_map[-1][y],
-                np.argmax(y_pred, axis=-1))
-            result = ndarray_from_iterable(result)
-            return result, -np.ones_like(result)
-        output_shape = y_pred[0].shape[:-1]
-        y_pred = tuple(map(lambda y: tf.reshape(y, (-1, y.shape[-1])), y_pred))
-        result = []
-        confidences = []
-        for y in zip(*y_pred):
-            rank = len(y) - 1
-            i = np.argmax(y[rank])
-            while rank > 0 and y[rank][i] < confidence_threshold:
-                rank -= 1
-                i = np.argmax(y[rank])
-            result.append(self.taxonomy_tree.taxonomy_id_map[rank][i])
-            confidences.append(y[rank][i])
-        return (
-            ndarray_from_iterable(result).reshape(output_shape),
-            np.array(confidences).reshape(output_shape))
-        # output_shape = y_pred[0].shape[:-1]
-        # y_pred = tuple(map(lambda y: tf.reshape(y, (-1, y.shape[-1])), y_pred))
-        # result = []
-        # confidences = []
-        # for y in zip(*y_pred):
-        #     taxon = self.taxonomy_tree.taxonomy_id_map[0][np.argmax(y[0])]
-        #     rank = 0
-        #     confidence = np.max(y[0])
-        #     total_confidence = confidence
-        #     while confidence >= confidence_threshold and rank < self.taxonomy_tree.depth - 1:
-        #         rank += 1
-        #         # If a call is made, we can re-weight the children.
-        #         start_id = next(iter(taxon.children.values())).taxonomy_id
-        #         end_id = len(taxon.children) + start_id
-        #         reweighted = softmax(np.log(y[rank][start_id:end_id+1]))
-        #         i = np.argmax(reweighted)
-        #         confidence = reweighted[i]
-        #         total_confidence *= confidence
-        #         if confidence >= confidence_threshold:
-        #             taxon = self.taxonomy_tree.taxonomy_id_map[rank][i + start_id]
-        #     result.append(taxon)
-        #     confidences.append(total_confidence)
-        # return (ndarray_from_iterable(result).reshape(output_shape), np.array(confidences).reshape(output_shape))
-        # labels, confidence = self._compute_rank_predictions(y_pred)
-        # print(labels)
-        # return labels
+    def _assign_taxonomy(self, y_pred: np.ndarray) -> NaiveTaxonomyPrediction:
+        """
+        Compute the confidence of each rank in the taxonomy for a given sample.
+        """
+        label = self.taxonomy_tree.taxonomy_id_map[-1][np.argmax(y_pred)]
+        confidences = np.empty(label.rank + 1, dtype=y_pred.dtype)
+        current = label
+        while current.rank > -1:
+            confidences[current.rank] = y_pred[current.taxonomy_id_range].sum() # type: ignore
+            current = current.parent
+        return self.NaiveTaxonomyPrediction(label, confidences)
 
 
 @CustomObject
@@ -193,7 +165,7 @@ class BertaxTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Mode
             in_help = outputs.copy()
             in_help.append(prev)
             prev = tf.keras.layers.Concatenate()(in_help)
-        outputs = [tf.keras.layers.Activation(tf.nn.softmax, name=rank.lower())(out) for rank, out in zip(taxonomy.RANKS, outputs)]
+        outputs = [tf.keras.layers.Activation(tf.nn.softmax, name=rank.lower())(out) for rank, out in zip(RANKS, outputs)]
         return tf.keras.Model(x, outputs)
 
     def default_metrics(self):
@@ -212,7 +184,7 @@ class BertaxTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Mode
                 #     min_confidence=0.7,
                 #     name="recall")
             ]
-            for rank, name in enumerate(taxonomy.RANKS[:self.taxonomy_tree.depth])
+            for rank, name in enumerate(RANKS[:self.taxonomy_tree.depth])
         }
 
     def _prediction_to_taxonomy(self, y_pred):
@@ -224,27 +196,65 @@ class BertaxTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Mode
 
 
 @CustomObject
-class TopDownTaxonomyClassificationModel(NaiveTaxonomyClassificationModel[ModelType]):
+class TopDownTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[ModelType]):
+
+    @dataclass
+    class TopDownTaxonomyPrediction(TaxonomyPrediction):
+        taxonomies: Tuple[TaxonomyTree.Taxon, ...]
+        confidence: np.ndarray
+
+        @classmethod
+        def deserialize(cls, data: bytes, taxonomy_tree: TaxonomyTree):
+            length = len(data) // 4
+            taxonomies = np.frombuffer(data, count=length, dtype=np.int32)
+            confidence = np.frombuffer(data, offset=4*length, dtype=np.float32)
+            return cls(tuple(taxonomy_tree.taxonomy_id_map[r][t] for r, t in enumerate(taxonomies)), confidence)
+
+        def constrained_taxonomy(self, confidence: float) -> Tuple[Optional[TaxonomyTree.Taxon], float]:
+            """
+            Return the label with confidence greater than or equal to the given confidence.
+            """
+            for i in range(len(self.confidence) - 1, -1, -1):
+                if self.confidence[i] >= confidence:
+                    return self.taxonomies[i], self.confidence[i]
+            return None, 1.0 - self.confidence[0]
+
+        def serialize(self) -> bytes:
+            taxonomies = np.array([t.taxonomy_id for t in self.taxonomies], dtype=np.int32)
+            return taxonomies.tobytes() + self.confidence.astype(np.float32).tobytes()
+
     def build_model(self):
         x = self.base.input
         y = self.base.output
-        outputs = [tf.keras.layers.Dense(len(self.taxonomy_tree.taxonomy_id_map[0]), name=taxonomy.RANKS[0].lower())(y)]
+        outputs = [tf.keras.layers.Dense(len(self.taxonomy_tree.taxonomy_id_map[0]), name=f"{RANKS[0].lower()}_projection")(y)]
         for rank, taxonomies in enumerate(self.taxonomy_tree.taxonomy_id_map[1:], start=1):
-            parent_logits = tf.gather(outputs[-1], [t.parent.taxonomy_id for t in taxonomies], axis=-1, name=f"{taxonomy.RANKS[rank].lower()}_logits")
-            dense = tf.keras.layers.Dense(len(taxonomies), name=f"{taxonomy.RANKS[rank].lower()}_projection")(y)
-            # gated_dense = tf.keras.layers.Add(name=taxonomy.RANKS[rank].lower())((parent_logits, dense))
+            parent_logits = tf.gather(outputs[-1], [t.parent.taxonomy_id for t in taxonomies], axis=-1, name=f"{RANKS[rank].lower()}_logits")
+            dense = tf.keras.layers.Dense(len(taxonomies), name=f"{RANKS[rank].lower()}_projection")(y)
             gated_dense = tf.keras.layers.Add()((parent_logits, dense))
             outputs.append(gated_dense)
-        y = tf.keras.layers.Activation(tf.nn.softmax)(outputs[-1])
-        return tf.keras.Model(x, y)
+        outputs = [
+            tf.keras.layers.Activation(tf.nn.softmax, name=f"{rank.lower()}")(y)
+            for rank, y in zip(RANKS, outputs)
+        ]
+        return tf.keras.Model(x, outputs)
 
     def default_metrics(self):
-        return super().default_metrics()
-        # return {
-        #     name.lower(): [
-        #         tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
-        #         metrics.MulticlassPrecision(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="precision"),
-        #         metrics.MulticlassRecall(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="recall")
-        #     ]
-        #     for rank, name in enumerate(taxonomy.RANKS[:self.taxonomy_tree.depth])
-        # }
+        return {
+            name.lower(): [
+                tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
+                metrics.MulticlassPrecision(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="precision"),
+                metrics.MulticlassRecall(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="recall")
+            ]
+            for rank, name in enumerate(RANKS[:self.taxonomy_tree.depth])
+        }
+
+    def assign_taxonomies(self, probabilities: List[np.ndarray]) -> np.ndarray:
+        shape = probabilities[0].shape[:-1]
+        probabilities = [p.reshape((-1, p.shape[-1])) for p in probabilities]
+        predictions = ndarray_from_iterable(list(map(self.assign_taxonomy, zip(*probabilities))))
+        return predictions.reshape(shape)
+
+    def assign_taxonomy(self, y_pred: Tuple[np.ndarray]) -> TopDownTaxonomyPrediction:
+        labels = tuple(self.taxonomy_tree.taxonomy_id_map[rank][np.argmax(y_pred[rank])] for rank in range(len(y_pred)))
+        confidence = np.array([y_pred[rank][l.taxonomy_id] for rank, l in enumerate(labels)])
+        return self.TopDownTaxonomyPrediction(labels, confidence)
