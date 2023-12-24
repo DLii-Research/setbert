@@ -1,23 +1,18 @@
-import argparse
-from dataclasses import dataclass, field
 from dnadb import dna, fasta
 import deepctx.scripting as dcs
 from lmdbm import Lmdb
 import numpy as np
-import numpy.typing as npt
 from pathlib import Path
-from qiime2 import Artifact
-from q2_deepdna.types import DeepDNASavedModelFormat
 import re
-from sklearn.pipeline import Pipeline
 from tqdm import tqdm
-from tqdm.contrib.concurrent import process_map
-from typing import Dict, List, Tuple
+from typing import List
 
 from deepdna.nn.models import load_model, dnabert, taxonomy as taxonomy_models
 
 
-def define_arguments(parser: argparse.ArgumentParser):
+def define_arguments(context: dcs.Context):
+    parser = context.argument_parser
+
     group = parser.add_argument_group("Data")
     group.add_argument("--datasets-path", type=Path, required=True, help="The path to the dataset to evaluate.")
     group.add_argument("--dataset", type=str, required=True, help="The name of the dataset to classify.")
@@ -28,8 +23,11 @@ def define_arguments(parser: argparse.ArgumentParser):
     group = parser.add_argument_group("Job")
     group.add_argument("--batch-size", type=int, default=500, help="The number of workers to use for parallel processing.")
 
-    group = parser.add_argument_group("Model")
-    group.add_argument("--classifier-path", type=Path, required=True, help="The path to the DNABERT classifier.")
+    # group = parser.add_argument_group("Model")
+    # group.add_argument("--classifier-path", type=Path, required=True, help="The path to the DNABERT classifier.")
+
+    wandb = context.get(dcs.module.Wandb)
+    wandb.add_artifact_argument("taxonomy-model", "The taxonomy model to use for classification.")
 
     return parser
 
@@ -72,8 +70,9 @@ def main(context: dcs.Context):
     samples = list((config.datasets_path / config.dataset / "synthetic" / config.reference_model / config.reference_dataset).glob("*.spec.tsv"))
 
     print("Loading model...")
-    artifact = Artifact.load(config.classifier_path)
-    path = Path(str(artifact.view(DeepDNASavedModelFormat))) / "model"
+    # artifact = Artifact.load(config.classifier_path)
+    # path = Path(str(artifact.view(DeepDNASavedModelFormat))) / "model"
+    path = context.get(dcs.module.Wandb).artifact_argument_path("taxonomy-model")
     model = load_model(path, taxonomy_models.AbstractTaxonomyClassificationModel)
 
     if isinstance(model, taxonomy_models.BertaxTaxonomyClassificationModel):
@@ -102,5 +101,6 @@ def main(context: dcs.Context):
 if __name__ == "__main__":
     context = dcs.Context(main)
     context.use(dcs.module.Tensorflow)
-    define_arguments(context.argument_parser)
+    context.use(dcs.module.Wandb).api_only()
+    define_arguments(context)
     context.execute()
