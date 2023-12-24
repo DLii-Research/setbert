@@ -72,7 +72,7 @@ def main(context: dcs.Context):
     print("Loading model...")
     # artifact = Artifact.load(config.classifier_path)
     # path = Path(str(artifact.view(DeepDNASavedModelFormat))) / "model"
-    path = context.get(dcs.module.Wandb).artifact_argument_path("taxonomy-model")
+    path = context.get(dcs.module.Wandb).artifact_argument_path("taxonomy_model")
     model = load_model(path, taxonomy_models.AbstractTaxonomyClassificationModel)
 
     if isinstance(model, taxonomy_models.BertaxTaxonomyClassificationModel):
