@@ -59,15 +59,13 @@ def main(context: dcs.Context):
     print("Generating...")
     for sample in tqdm(samples, desc="Generating synthetic samples"):
         for i in trange(config.subsamples_per_sample, desc=f"Generating subsamples for sample: {sample.name}", leave=False):
-            output_sequences = open(output_path / f"{sample.name}.{i}.fasta", 'w')
-            for new_sequence_id, sequence_entry in enumerate(sample.sample(config.subsample_size, rng)):
+            output_sequences = open(output_path / f"{sample.name}.{i}.spec.tsv", 'w')
+            for sequence_entry in sample.sample(config.subsample_size, rng):
                 label_id = taxonomy_map[sequence_entry.identifier]
                 ref_sequence_index = rng.choice(ref_taxonomies.sequence_indices_with_taxonomy_id(label_id))
                 ref_sequence_entry = ref_sequences_db[ref_sequence_index]
                 offset = rng.integers(0, len(ref_sequence_entry) - config.sequence_length + 1)
-                ref_sequence = ref_sequence_entry.sequence[offset:offset+config.sequence_length]
-
-                output_sequences.write(f">{new_sequence_id};orig:{sequence_entry.identifier};label:{label_id}\n{ref_sequence}\n")
+                output_sequences.write(f"{ref_sequence_index}\t{offset}:{offset+config.sequence_length}\n")
             output_sequences.close()
 
 
