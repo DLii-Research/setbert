@@ -33,6 +33,58 @@ class TaxonomyPrediction(abc.ABC):
         return NotImplemented
 
 
+@dataclass
+class NaiveTaxonomyPrediction(TaxonomyPrediction):
+    taxonomy: TaxonomyTree.Taxon
+    confidence: np.ndarray
+
+    @classmethod
+    def deserialize(cls, data: bytes, taxonomy_tree: TaxonomyTree):
+        taxonomy = np.frombuffer(data, count=1, dtype=np.int32)[0]
+        confidence = np.frombuffer(data, offset=4, dtype=np.float32)
+        return cls(taxonomy_tree.taxonomy_id_map[-1][taxonomy], confidence)
+
+    def constrained_taxonomy(self, confidence: float) -> Tuple[Optional[TaxonomyTree.Taxon], float]:
+        """
+        Return the label with confidence greater than or equal to the given confidence.
+        """
+        result = self.taxonomy
+        while result.rank > -1 and self.confidence[result.rank] < confidence:
+            result = result.parent
+        if result.rank == -1:
+            return None, 1.0 - self.confidence[0]
+        return result, self.confidence[result.rank]
+
+    def serialize(self) -> bytes:
+        return np.int32(self.taxonomy.taxonomy_id).tobytes() + self.confidence.astype(np.float32).tobytes()
+
+
+@dataclass
+class HierarchicalTaxonomyPrediction(TaxonomyPrediction):
+    taxonomies: Tuple[TaxonomyTree.Taxon, ...]
+    confidence: np.ndarray
+
+    @classmethod
+    def deserialize(cls, data: bytes, taxonomy_tree: TaxonomyTree):
+        length = len(data) // (2*4)
+        taxonomies = np.frombuffer(data, count=length, dtype=np.int32)
+        confidence = np.frombuffer(data, offset=4*length, dtype=np.float32)
+        return cls(tuple(taxonomy_tree.taxonomy_id_map[r][t] for r, t in enumerate(taxonomies)), confidence)
+
+    def constrained_taxonomy(self, confidence: float) -> Tuple[Optional[TaxonomyTree.Taxon], float]:
+        """
+        Return the label with confidence greater than or equal to the given confidence.
+        """
+        for i in range(len(self.confidence) - 1, -1, -1):
+            if self.confidence[i] >= confidence:
+                return self.taxonomies[i], self.confidence[i]
+        return None, 1.0 - self.confidence[0]
+
+    def serialize(self) -> bytes:
+        taxonomies = np.array([t.taxonomy_id for t in self.taxonomies], dtype=np.int32)
+        return taxonomies.tobytes() + self.confidence.astype(np.float32).tobytes()
+
+
 class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[ModelType]):
 
     base: ModelType
@@ -158,7 +210,7 @@ class BertaxTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Mode
         y = self.base.output
         prev = y
         outputs = []
-        taxon_counts = [len(m) for m in self.taxonomy_tree.id_to_taxon_map]
+        taxon_counts = [len(m) for m in self.taxonomy_tree.taxonomy_id_map]
         for i in range(self.taxonomy_tree.depth):
             out = tf.keras.layers.Dense(taxon_counts[i])(prev)
             outputs.append(out)
@@ -169,61 +221,25 @@ class BertaxTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Mode
         return tf.keras.Model(x, outputs)
 
     def default_metrics(self):
-        return {
-            name.lower(): [
-                metrics.MulticlassAccuracy(
-                    len(self.taxonomy_tree.id_to_taxon_map[rank]),
-                    min_confidence=0.7,
-                    name="accuracy"),
-                metrics.MulticlassPrecision(
-                    len(self.taxonomy_tree.id_to_taxon_map[rank]),
-                    min_confidence=0.7,
-                    name="precision"),
-                # metrics.MulticlassRecall(
-                #     len(self.taxonomy_tree.id_to_taxon_map[rank]),
-                #     min_confidence=0.7,
-                #     name="recall")
-            ]
-            for rank, name in enumerate(RANKS[:self.taxonomy_tree.depth])
-        }
+        return [tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")]
 
-    def _prediction_to_taxonomy(self, y_pred):
-        y_pred = [np.argmax(rank_pred, axis=-1, keepdims=True) for rank_pred in y_pred]
-        y_pred = np.concatenate(y_pred, axis=-1)
-        shape = y_pred.shape[:-1]
-        y_pred = ndarray_from_iterable(list(map(self.taxonomy_tree.reduce_taxonomy, y_pred.reshape((-1, y_pred.shape[-1])))))
-        return y_pred.reshape(shape)
+    def assign_taxonomies(self, probabilities: List[np.ndarray]) -> np.ndarray:
+        shape = probabilities[0].shape[:-1]
+        probabilities = [p.reshape((-1, p.shape[-1])) for p in probabilities]
+        predictions = ndarray_from_iterable(list(map(self.assign_taxonomy, zip(*probabilities))))
+        return predictions.reshape(shape)
+
+    def assign_taxonomy(self, y_pred: Tuple[np.ndarray]) -> HierarchicalTaxonomyPrediction:
+        labels = tuple(self.taxonomy_tree.taxonomy_id_map[rank][np.argmax(y_pred[rank])] for rank in range(len(y_pred)))
+        confidence = np.array([y_pred[rank][l.taxonomy_id] for rank, l in enumerate(labels)])
+        return HierarchicalTaxonomyPrediction(labels, confidence)
 
 
 @CustomObject
 class TopDownTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[ModelType]):
-
-    @dataclass
-    class TopDownTaxonomyPrediction(TaxonomyPrediction):
-        taxonomies: Tuple[TaxonomyTree.Taxon, ...]
-        confidence: np.ndarray
-
-        @classmethod
-        def deserialize(cls, data: bytes, taxonomy_tree: TaxonomyTree):
-            length = len(data) // 4
-            taxonomies = np.frombuffer(data, count=length, dtype=np.int32)
-            confidence = np.frombuffer(data, offset=4*length, dtype=np.float32)
-            return cls(tuple(taxonomy_tree.taxonomy_id_map[r][t] for r, t in enumerate(taxonomies)), confidence)
-
-        def constrained_taxonomy(self, confidence: float) -> Tuple[Optional[TaxonomyTree.Taxon], float]:
-            """
-            Return the label with confidence greater than or equal to the given confidence.
-            """
-            for i in range(len(self.confidence) - 1, -1, -1):
-                if self.confidence[i] >= confidence:
-                    return self.taxonomies[i], self.confidence[i]
-            return None, 1.0 - self.confidence[0]
-
-        def serialize(self) -> bytes:
-            taxonomies = np.array([t.taxonomy_id for t in self.taxonomies], dtype=np.int32)
-            return taxonomies.tobytes() + self.confidence.astype(np.float32).tobytes()
-
     def build_model(self):
+        # x = tf.keras.layers.Input(type_spec=self.base.input.type_spec)
+        # y = self.base(x)
         x = self.base.input
         y = self.base.output
         outputs = [tf.keras.layers.Dense(len(self.taxonomy_tree.taxonomy_id_map[0]), name=f"{RANKS[0].lower()}_projection")(y)]
@@ -239,14 +255,7 @@ class TopDownTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Mod
         return tf.keras.Model(x, outputs)
 
     def default_metrics(self):
-        return {
-            name.lower(): [
-                tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy"),
-                metrics.MulticlassPrecision(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="precision"),
-                metrics.MulticlassRecall(len(self.taxonomy_tree.taxonomy_id_map[rank]), name="recall")
-            ]
-            for rank, name in enumerate(RANKS[:self.taxonomy_tree.depth])
-        }
+        return [tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")]
 
     def assign_taxonomies(self, probabilities: List[np.ndarray]) -> np.ndarray:
         shape = probabilities[0].shape[:-1]
@@ -254,7 +263,7 @@ class TopDownTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Mod
         predictions = ndarray_from_iterable(list(map(self.assign_taxonomy, zip(*probabilities))))
         return predictions.reshape(shape)
 
-    def assign_taxonomy(self, y_pred: Tuple[np.ndarray]) -> TopDownTaxonomyPrediction:
+    def assign_taxonomy(self, y_pred: Tuple[np.ndarray]) -> HierarchicalTaxonomyPrediction:
         labels = tuple(self.taxonomy_tree.taxonomy_id_map[rank][np.argmax(y_pred[rank])] for rank in range(len(y_pred)))
         confidence = np.array([y_pred[rank][l.taxonomy_id] for rank, l in enumerate(labels)])
-        return self.TopDownTaxonomyPrediction(labels, confidence)
+        return HierarchicalTaxonomyPrediction(labels, confidence)
