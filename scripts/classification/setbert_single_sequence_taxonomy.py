@@ -10,7 +10,7 @@ import re
 from tqdm import tqdm
 from typing import List
 
-from deepdna.nn.models import load_model, dnabert, taxonomy as taxonomy_models
+from deepdna.nn.models import load_model, setbert, taxonomy as taxonomy_models
 
 
 def define_arguments(parser: argparse.ArgumentParser):
@@ -35,7 +35,7 @@ def classify_sequences(
     sequence_specs: List[str],
     sequence_db: fasta.FastaDb,
     batch_size: int,
-    model: taxonomy_models.AbstractTaxonomyClassificationModel[dnabert.DnaBertEncoderModel],
+    model: taxonomy_models.AbstractTaxonomyClassificationModel[setbert.SetBertEncoderModel],
     store: Lmdb
 ):
     to_classify = set()
@@ -52,7 +52,10 @@ def classify_sequences(
         sequence = sequence_db[sequence_index].sequence[start:end]
         sequences[i] = dna.encode_sequence(dna.augment_ambiguous_bases(sequence))
     sequences = dna.encode_kmers(sequences, model.base.kmer)
+    sequences = sequences[:,None,:] # sub-sample dimension
+    print(sequences.shape)
     predictions = model.predict(sequences, batch_size=batch_size, verbose=0)
+    predictions = predictions.flatten()
     store_update = {}
     for prediction, sequence_spec in zip(predictions, to_classify):
         prediction = prediction.serialize()
@@ -73,6 +76,8 @@ def main(context: dcs.Context):
     artifact = Artifact.load(config.classifier_path)
     path = Path(str(artifact.view(DeepDNASavedModelFormat))) / "model"
     model = load_model(path, taxonomy_models.AbstractTaxonomyClassificationModel)
+    assert isinstance(model.base, setbert.SetBertEncoderModel)
+    model.base.chunk_size = config.batch_size
 
     model_type = config.model_type
     print("Found model of type:", model_type, model.__class__)

@@ -1,6 +1,7 @@
 import argparse
-from dnadb import dna, fasta
+from dnadb import dna, fasta, taxonomy
 import deepctx.scripting as dcs
+from deepctx.lazy import tensorflow as tf
 from lmdbm import Lmdb
 import numpy as np
 from pathlib import Path
@@ -10,7 +11,7 @@ import re
 from tqdm import tqdm
 from typing import List
 
-from deepdna.nn.models import load_model, dnabert, taxonomy as taxonomy_models
+from deepdna.nn.models import load_model, dnabert, setbert, taxonomy as taxonomy_models
 
 
 def define_arguments(parser: argparse.ArgumentParser):
@@ -22,7 +23,9 @@ def define_arguments(parser: argparse.ArgumentParser):
     group.add_argument("--reference-dataset", type=str, required=True, help="The name of the reference dataset the synthetic samples were generated from.")
 
     group = parser.add_argument_group("Job")
-    group.add_argument("--batch-size", type=int, default=500, help="The number of workers to use for parallel processing.")
+    group.add_argument("--chunk-size", type=int, default=None, help="The number of DNA sequences to embed at a time")
+    group.add_argument("--batch-size", type=int, default=1, help="The number of workers to use for parallel processing.")
+    group.add_argument("--subsample-size", type=int, default=1000, help="The number of sequences per subsample.")
 
     group = parser.add_argument_group("Model")
     group.add_argument("--classifier-path", type=Path, required=True, help="The path to the DNABERT classifier.")
@@ -32,32 +35,31 @@ def define_arguments(parser: argparse.ArgumentParser):
 
 
 def classify_sequences(
-    sequence_specs: List[str],
+    sample_path: Path,
+    output_path: Path,
     sequence_db: fasta.FastaDb,
+    subsample_size: int,
     batch_size: int,
-    model: taxonomy_models.AbstractTaxonomyClassificationModel[dnabert.DnaBertEncoderModel],
-    store: Lmdb
+    model: taxonomy_models.TopDownTaxonomyClassificationModel[setbert.SetBertEncoderModel],
 ):
-    to_classify = set()
-    for sequence_spec in sequence_specs:
-        if sequence_spec in store:
-            continue
-        to_classify.add(sequence_spec)
-    if len(to_classify) == 0:
-        return
-    print("Classifying", len(to_classify), "sequences...")
-    sequences = np.empty((len(to_classify), model.base.sequence_length), dtype=np.uint8)
-    for i, sequence_spec in enumerate(to_classify):
-        sequence_index, start, end = map(int, re.findall(r"\d+", sequence_spec))
-        sequence = sequence_db[sequence_index].sequence[start:end]
-        sequences[i] = dna.encode_sequence(dna.augment_ambiguous_bases(sequence))
+    # if (output_path / (sample_path.stem + ".npz")).exists():
+    #     return
+    sequences = []
+    with open(sample_path) as f:
+        for sequence_spec in f:
+            sequence_index, start, end = map(int, re.findall(r"\d+", sequence_spec))
+            sequence = sequence_db[sequence_index].sequence[start:end]
+            sequences.append(dna.encode_sequence(dna.augment_ambiguous_bases(sequence)))
+    sequences = np.array(sequences, dtype=np.uint8)
     sequences = dna.encode_kmers(sequences, model.base.kmer)
+    sequences = sequences.reshape((-1, subsample_size, sequences.shape[1])) # sub-sample dimension
+    print("Classifying", len(sequences), "sequences:", sequences.shape)
     predictions = model.predict(sequences, batch_size=batch_size, verbose=0)
-    store_update = {}
-    for prediction, sequence_spec in zip(predictions, to_classify):
-        prediction = prediction.serialize()
-        store_update[sequence_spec] = prediction
-    store.update(store_update)
+    predictions = predictions.flatten()
+    predictions = [prediction.serialize() for prediction in predictions]
+    np.savez(
+        output_path / (sample_path.stem + ".npz"),
+        predictions=predictions)
 
 def main(context: dcs.Context):
     config = context.config
@@ -67,28 +69,31 @@ def main(context: dcs.Context):
         load_id_map_into_memory=True,
         load_sequences_into_memory=True)
 
-    samples = list((config.datasets_path / config.dataset / "synthetic" / config.reference_model / config.reference_dataset).glob("*.spec.tsv"))
+    samples = sorted((config.datasets_path / config.dataset / "synthetic" / config.reference_model / config.reference_dataset).glob("*.spec.tsv"))
 
     print("Loading model...")
     artifact = Artifact.load(config.classifier_path)
     path = Path(str(artifact.view(DeepDNASavedModelFormat))) / "model"
-    model = load_model(path, taxonomy_models.AbstractTaxonomyClassificationModel)
+    model = load_model(path, taxonomy_models.TopDownTaxonomyClassificationModel)
+    assert isinstance(model.base, setbert.SetBertEncoderModel)
 
     model_type = config.model_type
     print("Found model of type:", model_type, model.__class__)
 
     # Create the output path
-    output_path = config.output_path / "synthetic" / config.reference_dataset / model_type
+    output_path = config.output_path / "synthetic" / config.reference_dataset / (model_type + f"-{config.subsample_size}") / config.dataset / config.reference_model
     output_path.mkdir(parents=True, exist_ok=True)
-
-    # The results store
-    store = Lmdb.open(str(output_path / "taxonomies.spec.db"), 'c')
 
     for sample_path in tqdm(samples):
         if not context.is_running:
             break
-        with open(sample_path) as f:
-            classify_sequences(f.readlines(), sequence_db, config.batch_size, model, store)
+        classify_sequences(
+            sample_path,
+            output_path,
+            sequence_db,
+            config.subsample_size,
+            config.batch_size,
+            model)
 
 
 if __name__ == "__main__":
