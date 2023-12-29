@@ -2,6 +2,7 @@ import argparse
 import deepctx.scripting as dcs
 from deepctx.lazy import tensorflow as tf
 from dnadb import fasta, taxonomy
+import numpy as np
 from pathlib import Path
 
 from deepdna.nn import data_generators as dg
@@ -99,7 +100,7 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
     ModelType = MODEL_TYPES[config.model_type]
     if ModelType == taxonomy_models.BertaxTaxonomyClassificationModel:
         tail_pipeline = [
-            dg.taxon_ids(),
+            dg.taxonomy_ids(),
             lambda encoded_kmer_sequences, taxon_ids: (encoded_kmer_sequences, tuple(taxon_ids.T))
         ]
     elif ModelType == taxonomy_models.NaiveTaxonomyClassificationModel:
@@ -107,11 +108,19 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
             dg.taxonomy_id(),
             lambda encoded_kmer_sequences, taxonomy_id: (encoded_kmer_sequences, taxonomy_id)
         ]
+        train_tax_db.labels()
+        class_weights = np.array([
+            len(train_tax_db.sequence_indices_with_taxonomy_id(taxon.taxonomy_id))
+            for taxon in train_tax_db.labels()
+        ])
+        class_weights = {i: w for i, w in enumerate(np.min(class_weights) / class_weights)}
     elif ModelType == taxonomy_models.TopDownTaxonomyClassificationModel:
         tail_pipeline = [
-            dg.taxonomy_id(),
+            dg.taxonomy_ids(),
             lambda encoded_kmer_sequences, taxonomy_id: (encoded_kmer_sequences, taxonomy_id)
         ]
+
+        # class_weights = {i: w for i, w in enumerate(np.min(class_weights) / class_weights)}
     else:
         raise ValueError(f"Unknown model type: {repr(config.model_type)}")
 
@@ -128,7 +137,7 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
         *tail_pipeline
     ], shuffle=id(train_fasta_db) != id(val_fasta_db))
 
-    return (train_data, val_data)
+    return (train_data, val_data), class_weights
 
 
 def main(context: dcs.Context):
@@ -140,7 +149,7 @@ def main(context: dcs.Context):
     # Training
     if config.train:
         print("Training model...")
-        train_data, val_data = data_generators(
+        (train_data, val_data), class_weights = data_generators(
             config,
             model.instance.base.sequence_length,
             model.instance.base.kmer)
@@ -149,6 +158,7 @@ def main(context: dcs.Context):
         context.get(dcs.module.Train).fit(
             model.instance,
             train_data,
+            class_weight=class_weights,
             validation_data=val_data,
             validation_freq=config.val_frequency,
             callbacks=[
