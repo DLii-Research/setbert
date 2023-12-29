@@ -25,6 +25,7 @@ class PersistentDnaBertNaiveTaxonomyModel(
         wandb = self.context.get(dcs.module.Wandb)
         dnabert_pretrain_path = wandb.artifact_argument_path("dnabert_pretrain")
         dnabert_base = load_model(dnabert_pretrain_path, dnabert.DnaBertPretrainModel).base
+        print("DNABERT Stack size:", dnabert_base.stack)
         # Create the taxonomy model
         model = MODEL_TYPES[config.model_type](
             dnabert.DnaBertEncoderModel(
@@ -63,9 +64,6 @@ def define_arguments(context: dcs.Context):
 
     train = context.get(dcs.module.Train).train_argument_parser
     train.add_argument("--checkpoint-frequency", type=int, default=20, help="The number of epochs between checkpoints.")
-
-    val = context.get(dcs.module.Train).validation_argument_parser
-    val.add_argument("--val-frequency", type=int, default=20, help="The number of epochs between validation steps.")
 
     wandb = context.get(dcs.module.Wandb)
     wandb.add_artifact_argument("dnabert-pretrain", required=True)
@@ -150,7 +148,6 @@ def main(context: dcs.Context):
             model.instance,
             train_data,
             validation_data=val_data,
-            validation_freq=config.val_frequency,
             callbacks=[
                 tf.keras.callbacks.ModelCheckpoint(
                     filepath=str(model.path("model")),
@@ -174,7 +171,8 @@ if __name__ == "__main__":
             batch_size=256,
             val_batch_size=128,
             steps_per_epoch=100,
-            val_steps_per_epoch=20)
+            val_steps_per_epoch=20,
+            val_frequency=20)
     context.use(dcs.module.Rng)
     context.use(dcs.module.Wandb) \
         .resumeable() \
