@@ -130,31 +130,6 @@ class AbstractTaxonomyClassificationModel(ModelWrapper, CustomModel, Generic[Mod
 @CustomObject
 class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[ModelType]):
 
-    @dataclass
-    class NaiveTaxonomyPrediction(TaxonomyPrediction):
-        taxonomy: TaxonomyTree.Taxon
-        confidence: np.ndarray
-
-        @classmethod
-        def deserialize(cls, data: bytes, taxonomy_tree: TaxonomyTree):
-            taxonomy = np.frombuffer(data, count=1, dtype=np.int32)[0]
-            confidence = np.frombuffer(data, offset=4, dtype=np.float32)
-            return cls(taxonomy_tree.taxonomy_id_map[-1][taxonomy], confidence)
-
-        def constrained_taxonomy(self, confidence: float) -> Tuple[Optional[TaxonomyTree.Taxon], float]:
-            """
-            Return the label with confidence greater than or equal to the given confidence.
-            """
-            result = self.taxonomy
-            while result.rank > -1 and self.confidence[result.rank] < confidence:
-                result = result.parent
-            if result.rank == -1:
-                return None, 1.0 - self.confidence[0]
-            return result, self.confidence[result.rank]
-
-        def serialize(self) -> bytes:
-            return np.int32(self.taxonomy.taxonomy_id).tobytes() + self.confidence.astype(np.float32).tobytes()
-
     def build_model(self):
         x = self.base.input
         y = self.base.output
@@ -168,14 +143,14 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Model
                 metrics.TaxonomyRankAccuracy(
                     self.taxonomy_tree,
                     rank,
-                    min_confidence=0.7,
+                    min_confidence=0.0,
                     name=f"{name.lower()}_accuracy"))
-            metric_list.append(
-                metrics.TaxonomyRankPrecision(
-                    self.taxonomy_tree,
-                    rank,
-                    min_confidence=0.7,
-                    name=f"{name.lower()}_precision"))
+            # metric_list.append(
+            #     metrics.TaxonomyRankPrecision(
+            #         self.taxonomy_tree,
+            #         rank,
+            #         min_confidence=0.7,
+            #         name=f"{name.lower()}_precision"))
             # metric_list.append(
             #     metrics.TaxonomyRankRecall(
             #         self.taxonomy_tree,
@@ -200,7 +175,7 @@ class NaiveTaxonomyClassificationModel(AbstractTaxonomyClassificationModel[Model
         while current.rank > -1:
             confidences[current.rank] = y_pred[current.taxonomy_id_range].sum() # type: ignore
             current = current.parent
-        return self.NaiveTaxonomyPrediction(label, confidences)
+        return NaiveTaxonomyPrediction(label, confidences)
 
 
 @CustomObject

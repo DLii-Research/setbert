@@ -238,3 +238,27 @@ class SparseCategoricalCrossentropyWithIgnoreClass(tf.keras.losses.SparseCategor
             y_true = tf.gather_nd(y_true, indices_to_keep)
             y_pred = tf.gather_nd(y_pred, indices_to_keep)
         return super().call(y_true, y_pred)
+
+
+@CustomObject
+class ClassWeightedSparseCategoricalCrossentropy(tf.keras.losses.SparseCategoricalCrossentropy):
+    def __init__(
+        self,
+        class_weights,
+        from_logits=False,
+        *args,
+        **kwargs
+    ):
+        super().__init__(from_logits=from_logits, *args, **kwargs)
+        self.class_weights = tf.cast(tf.constant(class_weights), tf.float32)
+
+    def call(self, y_true, y_pred):
+        loss = super().call(y_true, y_pred)
+        result = loss * tf.gather_nd(self.class_weights, y_true)
+        return result
+
+    def get_config(self):
+        return {
+            **super().get_config(),
+            "class_weights": self.class_weights
+        }

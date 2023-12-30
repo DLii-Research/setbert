@@ -2,10 +2,12 @@ import argparse
 import deepctx.scripting as dcs
 from deepctx.lazy import tensorflow as tf
 from dnadb import fasta, taxonomy
+from functools import partial
 import numpy as np
 from pathlib import Path
 
 from deepdna.nn import data_generators as dg
+from deepdna.nn.losses import ClassWeightedSparseCategoricalCrossentropy
 from deepdna.nn.models import dnabert, load_model
 from deepdna.nn.models import taxonomy as taxonomy_models
 
@@ -15,7 +17,7 @@ MODEL_TYPES = {
     "topdown": taxonomy_models.TopDownTaxonomyClassificationModel
 }
 
-class PersistentDnaBertNaiveTaxonomyModel(
+class PersistentDnaBertTaxonomyModel(
     dcs.module.Wandb.PersistentObject[taxonomy_models.AbstractTaxonomyClassificationModel[dnabert.DnaBertEncoderModel]]
 ):
     def create(self, config: argparse.Namespace):
@@ -41,6 +43,20 @@ class PersistentDnaBertNaiveTaxonomyModel(
             metrics=None if config.no_metrics else "default") # Remove metrics for speed-up
         return model
 
+    def compile(self, config: argparse.Namespace, class_weights):
+        if config.use_class_weights:
+            print("Using class weights...")
+            if isinstance(self.instance, taxonomy_models.NaiveTaxonomyClassificationModel):
+                loss = ClassWeightedSparseCategoricalCrossentropy(class_weights, from_logits=False)
+            else:
+                loss = [ClassWeightedSparseCategoricalCrossentropy(w, from_logits=False) for w in class_weights]
+        else:
+            loss = "default"
+        self.instance.compile(
+            loss=loss,
+            optimizer=tf.keras.optimizers.Adam(config.lr),
+            metrics=None if config.no_metrics else "default") # Remove metrics for speed-up
+
     def load(self):
         return load_model(self.path("model"), taxonomy_models.AbstractTaxonomyClassificationModel[dnabert.DnaBertEncoderModel])
 
@@ -62,6 +78,7 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--model-type", type=str, required=True, choices=["bertax", "naive", "topdown"], help="The type of taxonomy model to use.")
     group.add_argument("--lr", type=float, default=1e-4, help="The learning rate to use for training.")
     group.add_argument("--no-metrics", action="store_true", help="Disable metrics for faster training.")
+    group.add_argument("--use-class-weights", action="store_true", help="Use class weights for training.")
 
     train = context.get(dcs.module.Train).train_argument_parser
     train.add_argument("--checkpoint-frequency", type=int, default=20, help="The number of epochs between checkpoints.")
@@ -83,6 +100,19 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
         val_fasta_db = train_fasta_db
         val_tax_db = train_tax_db
 
+    # Balance the dataset using class weights (inverse class frequency)
+    class_weights = []
+    for rank_taxons in train_tax_db.tree.taxonomy_id_map:
+        class_weights_for_rank = []
+        for taxon in rank_taxons:
+            n = 0
+            for taxonomy_id in taxon.taxonomy_id_range:
+                n += len(train_tax_db.sequence_indices_with_taxonomy_id(taxonomy_id))
+            class_weights_for_rank.append(n)
+        class_weights_for_rank = 1 / np.array(class_weights_for_rank)
+        class_weights_for_rank = class_weights_for_rank / np.sum(class_weights_for_rank) * len(class_weights_for_rank)
+        class_weights.append(class_weights_for_rank)
+
     # Construct the main pipeline
     body_pipeline = [
         # dg.random_samples(fasta_db),
@@ -99,7 +129,7 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
     if ModelType == taxonomy_models.BertaxTaxonomyClassificationModel:
         tail_pipeline = [
             dg.taxonomy_ids(),
-            lambda encoded_kmer_sequences, taxon_ids: (encoded_kmer_sequences, tuple(taxon_ids.T))
+            lambda encoded_kmer_sequences, taxonomy_ids: (encoded_kmer_sequences, tuple(taxonomy_ids.T))
         ]
     elif ModelType == taxonomy_models.NaiveTaxonomyClassificationModel:
         tail_pipeline = [
@@ -107,18 +137,12 @@ def data_generators(config: argparse.Namespace, sequence_length: int, kmer: int)
             lambda encoded_kmer_sequences, taxonomy_id: (encoded_kmer_sequences, taxonomy_id)
         ]
         train_tax_db.labels()
-        class_weights = np.array([
-            len(train_tax_db.sequence_indices_with_taxonomy_id(taxon.taxonomy_id))
-            for taxon in train_tax_db.labels()
-        ])
-        class_weights = {i: w for i, w in enumerate(np.min(class_weights) / class_weights)}
+        class_weights = class_weights[-1]
     elif ModelType == taxonomy_models.TopDownTaxonomyClassificationModel:
         tail_pipeline = [
             dg.taxonomy_ids(),
-            lambda encoded_kmer_sequences, taxonomy_id: (encoded_kmer_sequences, taxonomy_id)
+            lambda encoded_kmer_sequences, taxonomy_ids: (encoded_kmer_sequences, tuple(taxonomy_ids.T))
         ]
-
-        # class_weights = {i: w for i, w in enumerate(np.min(class_weights) / class_weights)}
     else:
         raise ValueError(f"Unknown model type: {repr(config.model_type)}")
 
@@ -142,7 +166,7 @@ def main(context: dcs.Context):
     config = context.config
 
     # Get the model instance
-    model = PersistentDnaBertNaiveTaxonomyModel()
+    model = PersistentDnaBertTaxonomyModel()
 
     # Training
     if config.train:
@@ -153,10 +177,10 @@ def main(context: dcs.Context):
             model.instance.base.kmer)
         model.path("model").mkdir(exist_ok=True, parents=True)
         print("Checkpoint frequency", config.checkpoint_frequency)
+        model.compile(config, class_weights)
         context.get(dcs.module.Train).fit(
             model.instance,
             train_data,
-            class_weight=class_weights,
             validation_data=val_data,
             callbacks=[
                 tf.keras.callbacks.ModelCheckpoint(

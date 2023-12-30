@@ -186,7 +186,8 @@ class MinConfidenceMetricTrait(tf.keras.metrics.Metric):
         return y_true, y_pred, sample_weight
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "min_confidence": self.min_confidence
         }
 
@@ -229,7 +230,8 @@ class MulticlassAccuracy(MinConfidenceMetricTrait, tf.keras.metrics.Metric):
         self.true_positives.assign(tf.zeros_like(self.true_positives))
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "num_classes": self.num_classes
         }
 
@@ -276,7 +278,8 @@ class MulticlassPrecision(MinConfidenceMetricTrait, tf.keras.metrics.Metric):
         self.false_positives.assign(tf.zeros_like(self.false_positives))
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "num_classes": self.num_classes
         }
 
@@ -323,7 +326,8 @@ class MulticlassRecall(MinConfidenceMetricTrait, tf.keras.metrics.Metric):
         self.false_negatives.assign(tf.zeros_like(self.false_negatives))
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "num_classes": self.num_classes
         }
 
@@ -369,7 +373,8 @@ class TaxonomyRankMetric(tf.keras.metrics.Metric):
         return super().update_state(y_true, y_pred, sample_weight=sample_weight)
 
     def get_config(self):
-        return super().get_config() | {
+        return {
+            **super().get_config(),
             "taxonomy_tree": self.taxonomy_tree.serialize().decode(),
             "rank": self.rank
         }
