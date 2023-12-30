@@ -260,5 +260,5 @@ class ClassWeightedSparseCategoricalCrossentropy(tf.keras.losses.SparseCategoric
     def get_config(self):
         return {
             **super().get_config(),
-            "class_weights": self.class_weights
+            "class_weights": self.class_weights.numpy() # type: ignore
         }
