@@ -348,6 +348,7 @@ class AttributableMultiHeadAttention(tf.keras.layers.MultiHeadAttention):
 
 @CustomObject
 class RelativeMultiHeadAttention(tf.keras.layers.MultiHeadAttention):
+    # https://jaketae.github.io/study/relative-positional-encoding/
     def __init__(self, max_seq_len=None, **kwargs):
         super().__init__(**kwargs)
         self._max_seq_len = max_seq_len
