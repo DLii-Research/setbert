@@ -53,7 +53,6 @@ def classify_sequences(
         sequences[i] = dna.encode_sequence(dna.augment_ambiguous_bases(sequence))
     sequences = dna.encode_kmers(sequences, model.base.kmer)
     sequences = sequences[:,None,:] # sub-sample dimension
-    print(sequences.shape)
     predictions = model.predict(sequences, batch_size=batch_size, verbose=0)
     predictions = predictions.flatten()
     store_update = {}
