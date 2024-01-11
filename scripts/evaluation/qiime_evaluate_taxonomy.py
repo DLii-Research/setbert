@@ -3,6 +3,8 @@ import joblib
 from pathlib import Path
 from sklearn.pipeline import Pipeline
 from tqdm.contrib.concurrent import process_map
+from qiime2 import Artifact
+from q2_feature_classifier.types import Pipeline
 
 import _common
 
