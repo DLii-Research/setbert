@@ -27,8 +27,8 @@ declare -A dnabert_pretrain_artifacts=(
 # DNABERT Taxonomy
 declare -A dnabert_taxonomy_artifacts=(
     [bertax-silva-nr99-filtered-515f-806r]=sirdavidludwig/taxonomy-classification/bertax-silva-nr99-filtered-515f-806r-64d-150bp:v3
-    [naive-silva-nr99-filtered-515f-806r]=sirdavidludwig/taxonomy-classification/naive-silva-nr99-filtered-515f-806r-64d-150bp:v0
-    [topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/taxonomy-classification/topdown-silva-nr99-filtered-515f-806r-64d-150bp:v2
+    [naive-silva-nr99-filtered-515f-806r]=sirdavidludwig/taxonomy-classification/naive-silva-nr99-filtered-515f-806r-64d-150bp:v3
+    [topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/taxonomy-classification/topdown-silva-nr99-filtered-515f-806r-64d-150bp:v4
 )
 
 # SetBERT
