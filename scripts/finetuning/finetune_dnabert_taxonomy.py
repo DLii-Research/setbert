@@ -38,9 +38,8 @@ class PersistentDnaBertTaxonomyModel(
             taxonomy_tree)
         print(model.__class__)
         model.summary()
-        model.compile(
-            optimizer=tf.keras.optimizers.Adam(config.lr),
-            metrics=None if config.no_metrics else "default") # Remove metrics for speed-up
+        for output in model.outputs:
+            print(output.shape)
         return model
 
     def compile(self, config: argparse.Namespace, class_weights):
@@ -49,6 +48,7 @@ class PersistentDnaBertTaxonomyModel(
             if isinstance(self.instance, taxonomy_models.NaiveTaxonomyClassificationModel):
                 loss = ClassWeightedSparseCategoricalCrossentropy(class_weights, from_logits=False)
             else:
+                print([len(w) for w in class_weights])
                 loss = [ClassWeightedSparseCategoricalCrossentropy(w, from_logits=False) for w in class_weights]
         else:
             loss = "default"

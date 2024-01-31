@@ -53,7 +53,7 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--datasets-path", type=Path, required=True, help="The path to the datasets directory.")
     group.add_argument("--datasets", type=str, nargs="+", required=True, help="The names of the datasets to use for training.")
     group.add_argument("--reference-dataset", type=str, required=True, help="The name of the dataset to use for reference sequences and taxonomies.")
-    group.add_argument("--reference-model", type=str, required=True, help="The name of the model used to assign taxonomies to the real sequences.")
+    group.add_argument("--reference-models", type=str, nargs="+", required=True, help="The name of the models used to assign taxonomies to the real sequences.")
 
     group = parser.add_argument_group("Model Settings")
     group.add_argument("--embed-dim", type=int, default=64)
@@ -81,7 +81,8 @@ def data_generators(context: dcs.Context, model: SetBertPretrainWithTaxaAbundanc
     config.datasets = sorted(config.datasets)
     print(f"Using {len(config.datasets)} dataset(s):", ', '.join(config.datasets))
     for dataset in config.datasets:
-        samples += sequences_db.mappings(config.datasets_path / dataset / f"sequences.{config.reference_model}.{config.reference_dataset}.fasta.mapping.db")
+        for reference_model in config.reference_models:
+            samples += sequences_db.mappings(config.datasets_path / dataset / f"sequences.{reference_model}.{config.reference_dataset}.fasta.mapping.db")
     print(f"Found {len(samples)} samples/runs.")
     training = context.get(dcs.module.Train)
     train_data = model.data_generator(
