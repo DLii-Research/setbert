@@ -168,8 +168,8 @@ def data_generators(context: dcs.Context, sequence_length: int, kmer: int):
     ModelType = MODEL_TYPES[config.model_type]
     if ModelType == taxonomy_models.BertaxTaxonomyClassificationModel:
         tail_pipeline = [
-            dg.taxon_ids(),
-            lambda encoded_kmer_sequences, taxon_ids: (encoded_kmer_sequences, tuple(taxon_ids.T))
+            dg.taxonomy_ids(),
+            lambda encoded_kmer_sequences, taxonomy_ids: (encoded_kmer_sequences, tuple(np.transpose(taxonomy_ids, (2, 0, 1)))) # [3, 1000, 6].T -> [6, 3, 1000]
         ]
     elif ModelType == taxonomy_models.NaiveTaxonomyClassificationModel:
         tail_pipeline = [
@@ -178,8 +178,8 @@ def data_generators(context: dcs.Context, sequence_length: int, kmer: int):
         ]
     elif ModelType == taxonomy_models.TopDownTaxonomyClassificationModel:
         tail_pipeline = [
-            dg.taxonomy_id(),
-            lambda encoded_kmer_sequences, taxonomy_id: (encoded_kmer_sequences, taxonomy_id)
+            dg.taxonomy_ids(),
+            lambda encoded_kmer_sequences, taxonomy_ids: (encoded_kmer_sequences, tuple(np.transpose(taxonomy_ids, (2, 0, 1)))) # [3, 1000, 6].T -> [6, 3, 1000]
         ]
     else:
         raise ValueError(f"Unknown model type: {repr(config.model_type)}")
@@ -199,10 +199,12 @@ def data_generators(context: dcs.Context, sequence_length: int, kmer: int):
         *tail_pipeline
     ], shuffle=config.val_datasets is not None)
 
-    test_batch = train_data[0]
-    print("Batch shape")
-    print(test_batch[0].shape)
-    print(test_batch[1].shape)
+    # test_batch = train_data[0]
+    # print("Batch shape")
+    # print(test_batch[0].shape)
+    # print(len(test_batch[1]), test_batch[1][0].shape, test_batch[1][-1].shape)
+
+    # print(test_batch[1])
 
     return (train_data, val_data)
 
