@@ -33,12 +33,20 @@ declare -A dnabert_taxonomy_artifacts=(
 
 # SetBERT
 declare -A setbert_pretrain_artifacts=(
-    [qiime-silva-nr99-filtered-515f-806r]=sirdavidludwig/setbert-pretrain/setbert-pretrain-qiime-silva-nr99-filtered-515f-806r-64d-150bp:all
     [topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/setbert-pretrain/topdown-silva-nr99-filtered-515f-806r-64d-150l:all
     [hns-topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/setbert-pretrain/topdown-silva-nr99-filtered-515f-806r-64d-150l:hns # Leave-out Wetland
     [hnw-topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/setbert-pretrain/topdown-silva-nr99-filtered-515f-806r-64d-150l:hnw # Leave-out SFD
     [hsw-topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/setbert-pretrain/topdown-silva-nr99-filtered-515f-806r-64d-150l:hsw # Leave-out Nachusa
     [nsw-topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/setbert-pretrain/topdown-silva-nr99-filtered-515f-806r-64d-150l:nsw # Leave-out Hopland
+)
+
+# SetBERT Taxonomy Models
+declare -A setbert_taxonomy_artifacts=(
+    [topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/taxonomy-classification/setbert-taxonomy-topdown-silva-nr99-filtered-515f-806r-64d-150bp:v0
+    [hns-topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/taxonomy-classification/setbert-taxonomy-topdown-hns-silva-nr99-filtered-515f-806r-64d-150bp:v0 # Leave-out Wetland
+    [hnw-topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/taxonomy-classification/setbert-taxonomy-topdown-hnw-silva-nr99-filtered-515f-806r-64d-150bp:v0 # Leave-out SFD
+    [hsw-topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/taxonomy-classification/setbert-taxonomy-topdown-hsw-silva-nr99-filtered-515f-806r-64d-150bp:v0 # Leave-out Nachusa
+    [nsw-topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/taxonomy-classification/setbert-taxonomy-topdown-nsw-silva-nr99-filtered-515f-806r-64d-150bp:v0 # Leave-out Hopland
 )
 
 # SetBERT Hopland Models
