@@ -15,24 +15,22 @@ from deepdna.nn.models import load_model, setbert
 def define_arguments(context: dcs.Context):
     parser = context.argument_parser
     group = parser.add_argument_group("Data Settings")
-    group.add_argument("--hopland-dataset-path", type=Path, required=True, help="The path to the SFD dataset.")
+    group.add_argument("--hopland-dataset-path", type=Path, required=True, help="The path to the Hopland dataset.")
     group.add_argument("--output-path", type=Path, required=True, help="The path to save the results to.")
     group.add_argument("--slice", type=str, default=None, help="The slice of the dataset samples to use given in Python slice synthax. For example, '0:100' will use the first 100 samples.")
     group.add_argument("--subsample-size", type=int, default=1000, help="The number of sequences per subsample.")
 
     wandb = context.get(dcs.module.Wandb)
-    wandb.add_artifact_argument("model", required=True, description="The SFD classification model to use.")
+    wandb.add_artifact_argument("model", required=True, description="The Hopland classification model to use.")
 
 
 def main(context: dcs.Context):
     config = context.config
 
-    metadata = pd.read_csv(config.hopland_dataset_path / "metadata.csv")
-    targets = {row["swab_label"]: row["oo_present"] for _, row in metadata.iterrows()}
-
     sequences_db = fasta.FastaDb(config.hopland_dataset_path / "sequences.fasta.db")
     samples = sequences_db.mappings(config.hopland_dataset_path / "sequences.fasta.mapping.db")
-    samples = sorted([s for s in samples if s.name in targets], key=lambda s: s.name)
+    samples = sorted(samples, key=lambda s: s.name)
+    targets = {s.name: int('-R-' in s.name) for s in samples}
     if config.slice is not None:
         samples = eval(f"samples[{config.slice}]")
         print("Using slice:", config.slice)
@@ -41,12 +39,12 @@ def main(context: dcs.Context):
     print("Loading model...")
     wandb = context.get(dcs.module.Wandb)
     path = wandb.artifact_argument_path("model")
-    model = load_model(path, setbert.SetBertSfdClassifierModel)
+    model = load_model(path, setbert.SetBertHoplandBulkRhizosphereClassifierModel)
 
     print("Building attribution model...")
     attribution = model.make_attribution_model()
 
-    output_path = Path(config.output_path)
+    output_path = Path(config.output_path) / "results"
     output_path.mkdir(exist_ok=True, parents=True)
 
     for s in tqdm(samples, desc="Evaluating samples"):
@@ -63,7 +61,7 @@ def main(context: dcs.Context):
         for _ in trange(10, desc=f"{s.name}", leave=False):
             sequences, fasta_ids = dg.BatchGenerator(1, 1, [
                 dg.from_sample(s),
-                dg.random_sequence_entries(config.subsamplesize),
+                dg.random_sequence_entries(config.subsample_size),
                 dg.sequences(150),
                 dg.encode_sequences(),
                 dg.augment_ambiguous_bases(),
