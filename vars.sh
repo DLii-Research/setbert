@@ -51,11 +51,10 @@ declare -A setbert_taxonomy_artifacts=(
 
 # SetBERT Hopland Models
 declare -A setbert_hopland_artifacts=(
-    [qiime-silva-nr99-filtered-515f-806r]=sirdavidludwig/hopland/setbert-hopland-qiime-silva-nr99-filtered-515f-806r-64d-150bp:v0
-    [topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/hopland/setbert-hopland-qiime-br-classifier-64d-150bp:v3
+    [topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/hopland/setbert-hopland-topdown-br-classifier-64d-150bp:v1
 )
 
 # SetBERT SFD Models
 declare -A setbert_sfd_artifacts=(
-    [topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/sfd/setbert-sfd-classifier-silva-nr99-filtered-515f-806r-64d-150bp:v0
+    [topdown-silva-nr99-filtered-515f-806r]=sirdavidludwig/sfd/setbert-sfd-classifier-64d-150bp:v1
 )
