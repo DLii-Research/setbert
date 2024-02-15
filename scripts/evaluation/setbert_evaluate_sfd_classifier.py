@@ -18,6 +18,7 @@ def define_arguments(context: dcs.Context):
     group.add_argument("--sfd-dataset-path", type=Path, required=True, help="The path to the SFD dataset.")
     group.add_argument("--output-path", type=Path, required=True, help="The path to save the results to.")
     group.add_argument("--slice", type=str, default=None, help="The slice of the dataset samples to use given in Python slice synthax. For example, '0:100' will use the first 100 samples.")
+    group.add_argument("--subsample-size", type=int, default=1000, help="The number of sequences per subsample.")
 
     wandb = context.get(dcs.module.Wandb)
     wandb.add_artifact_argument("model", required=True, description="The SFD classification model to use.")
@@ -62,7 +63,7 @@ def main(context: dcs.Context):
         for _ in trange(10, desc=f"{s.name}", leave=False):
             sequences, fasta_ids = dg.BatchGenerator(1, 1, [
                 dg.from_sample(s),
-                dg.random_sequence_entries(1000),
+                dg.random_sequence_entries(config.subsample_size),
                 dg.sequences(150),
                 dg.encode_sequences(),
                 dg.augment_ambiguous_bases(),
