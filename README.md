@@ -1,6 +1,6 @@
-# deep-dna
+# SetBERT
 
-A repository containing deep-learning models and job scripts.
+The official repository for SetBERT.
 
 
 ## Setup
@@ -8,8 +8,8 @@ A repository containing deep-learning models and job scripts.
 Download and install by running the following in a terminal:
 
 ```bash
-git clone git@github.com:DLii-Research/deep-dna.git
-cde deep-dna
+git clone git@github.com:DLii-Research/setbert.git
+cd setbert
 pip install -e .
 ```
 
