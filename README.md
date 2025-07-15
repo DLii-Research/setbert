@@ -70,7 +70,7 @@ model.config.sequence_encoder_chunk_size = None
 
 ```bash
 git clone https://github.com/DLii-Research/setbert
-pip install -e ./new-setbert
+pip install -e ./setbert
 ```
 
 ## Citation
