@@ -1,0 +1,21 @@
+[project]
+name = "dbtk-setbert"
+version = "1.0.0"
+authors = [
+  { name="David W. Ludwig II", email="davidludwigii@gmail.com" }
+]
+description = "The official SetBERT implementation using the deepbio-toolkit."
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.8"
+dependencies = [
+  "deepbio-toolkit >= 0.4.2",
+  "dbtk-dnabert >= 1.2.2"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/DLii-Research/setbert"
+"Bug Tracker" = "https://github.com/DLii-Research/setbert/issues"
+
+[tool.ruff]
+line-length = 100
