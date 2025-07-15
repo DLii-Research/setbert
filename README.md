@@ -2,11 +2,12 @@
 
 The official code repository for [SetBERT: SetBERT: the deep learning platform for contextualized embeddings and explainable predictions from high-throughput sequencing](https://academic.oup.com/bioinformatics/article/41/7/btaf370/8173948)
 
-![Graphical Abstract](./graphics/graphical_abstract.png)
+![Graphical Abstract](
+https://raw.githubusercontent.com/DLii-Research/setbert/refs/heads/master/graphics/graphical_abstract.png)
 
 ## Quick Start
 
-Installation:
+Installation from [PyPI](https://pypi.org/project/dbtk-setbert/):
 ```bash
 pip install dbtk-setbert
 ```
