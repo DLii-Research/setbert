@@ -11,7 +11,7 @@ Installation:
 pip install dbtk-setbert
 ```
 
-Download pre-trained SetBERT model trained on the Qiita platform:
+Download SetBERT pre-trained on the Qiita 16S platform (see [Available Models](#available-models) for other options):
 ```py
 from setbert import SetBert
 
@@ -46,10 +46,7 @@ sequence_embeddings = output["sequences"]
 ```
 
 ## Available Models:
-
-<!-- Table of pre-trained models -->
-
-- `sirdavidludwig/setbert` setbert-pretrain-qiita-16s`: Pre-trained on the Qiita platform using 16S samples from the Greengenes database.
+<a name="available-models"></a>
 
 Model Revision | Platform     | Pre-training Dataset Description
 ---------------|--------------|---------------------------------
