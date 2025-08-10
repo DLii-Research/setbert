@@ -26,6 +26,8 @@ tokenizer = model.sequence_encoder.tokenizer
 Example sample embedding
 
 ```py
+import torch
+
 # Input sample
 sequences = [
     "ACTGCAG",
@@ -34,7 +36,7 @@ sequences = [
 ]
 
 # Tokenize sequences in the sample
-sequence_tokens = torch.stack([tokenizer(s) for s in sequences])
+sequence_tokens = torch.stack([torch.tensor(tokenizer(s)) for s in sequences])
 
 # Compute embeddings
 output = model(sequence_tokens)
