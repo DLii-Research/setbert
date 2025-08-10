@@ -93,4 +93,4 @@ pip install -e ./setbert
 
 ## Original Experiment Source Code
 
-The original source code used to produce the models and experiments for the manuscript are available in the bioinformatics branch of this repository.
+The original source code used to produce the models and experiments for the manuscript are available in the [bioinformatics](https://github.com/DLii-Research/setbert/tree/bioinformatics) branch of this repository.
