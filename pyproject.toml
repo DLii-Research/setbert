@@ -1,6 +1,6 @@
 [project]
 name = "dbtk-setbert"
-version = "1.0.2"
+version = "1.0.3"
 authors = [
   { name="David W. Ludwig II", email="davidludwigii@gmail.com" }
 ]
@@ -10,7 +10,8 @@ license = { file="LICENSE" }
 requires-python = ">=3.8"
 dependencies = [
   "deepbio-toolkit >= 0.4.2",
-  "dbtk-dnabert >= 1.2.2"
+  "dbtk-dnabert >= 1.2.2",
+  "explainable-attention >= 0.0.2"
 ]
 
 [project.urls]
